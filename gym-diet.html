@@ -162,6 +162,12 @@ const DEFAULT_EX = {
 
 const FOOD_CATS = ['فواكه','خضار','تمر','حليب','لحوم','حلويات','مخبوزات','مطبوخ'];
 
+// فترات المكملات الجاهزة (بالأيام)
+const FREQS = [
+  ['كل يوم',1],['يوم إي يوم لا (كل يومين)',2],['كل 3 أيام',3],['كل أسبوع',7],['كل أسبوعين',14],
+  ['كل شهر',30],['كل شهرين',60],['كل 3 أشهر',90],['كل 6 أشهر',180],['كل سنة',365]
+];
+
 const SEED_FOODS = [
   ['فواكه','تفاحة','حبة',95,0.5,0.3,25],['فواكه','موز','حبة',105,1.3,0.4,27],['فواكه','برتقالة','حبة',62,1.2,0.2,15],
   ['فواكه','عنب','100غ',69,0.7,0.2,18],['فواكه','بطيخ','100غ',30,0.6,0.2,8],['فواكه','مانجو','100غ',60,0.8,0.4,15],
@@ -207,10 +213,18 @@ function makeSets(count, reps, weight, oldDoneArr){
   }));
 }
 
+// متوسط الوزن عبر الجولات — أساس نسبة التقدم (الوزن فقط، بدون العدات)
+function avgW(sets){
+  if (!sets || !sets.length) return 0;
+  return sets.reduce((a, s) => a + num(s.w), 0) / sets.length;
+}
+
 function normalizeExItem(it){
   const count = Math.max(1, Math.min(12, Math.round(num(it.s) || (Array.isArray(it.sets) ? it.sets.length : 3))));
   if (!Array.isArray(it.sets) || !it.sets.length) {
     it.sets = makeSets(count, it.r, it.w, it.setDone);
+    // ترحيل عدات الجولات من النسخة القديمة (rs)
+    if (Array.isArray(it.rs)) it.sets.forEach((st, i) => { if (it.rs[i] != null) st.r = num(it.rs[i]); });
   } else {
     it.sets = it.sets.map(st => ({
       r: num(st.r),
@@ -219,23 +233,31 @@ function normalizeExItem(it){
     }));
   }
   it.s = it.sets.length;
-  // Normalize superset group: '' | '1' | '2' | '3' | '4'
-  if (it.ss === true) it.ss = '1';
-  else if (!it.ss) it.ss = '';
-  else it.ss = String(it.ss);
 
-  // Baseline volume (total reps * weight across sets)
-  if (it.baseVol == null) {
-    if (num(it.sw) || num(it.sr)) {
-      it.baseVol = it.sets.length * (num(it.sw) || num(it.w)) * (num(it.sr) || num(it.r));
-    } else {
-      it.baseVol = calcSetsVolume(it.sets);
-    }
+  // مجموعة السوبر سيت: '' | '1'..'4'
+  if (it.ss === true) it.ss = '1';
+  else if (!it.ss || it.ss === '0') it.ss = '';
+  else {
+    const n = Math.round(num(it.ss));
+    it.ss = n >= 1 && n <= 4 ? String(n) : (n > 4 ? '4' : '');
+  }
+
+  // وزن البداية لحساب التقدم
+  if (it.baseW == null) {
+    if (num(it.sw) > 0) it.baseW = num(it.sw);
+    else if (num(it.baseVol) > 0) {
+      const sr = it.sets.reduce((a, s) => a + num(s.r), 0);
+      it.baseW = sr ? +(num(it.baseVol) / sr).toFixed(2) : avgW(it.sets);
+    } else it.baseW = avgW(it.sets);
   }
 }
 
-function calcSetsVolume(sets){
-  return (sets || []).reduce((sum, st) => sum + (num(st.r) * (num(st.w) > 0 ? num(st.w) : 1)), 0);
+// تصفير علامات الجولات إذا كانت من يوم سابق
+function resetStaleSets(st){
+  const td = todayStr();
+  (st.pr || []).forEach(p => (p.days || []).forEach(d => (d.items || []).forEach(it => {
+    if (it.sd !== td && Array.isArray(it.sets)) it.sets.forEach(s => { s.done = false; });
+  })));
 }
 
 function loadState(){
@@ -261,19 +283,27 @@ function loadState(){
   }
   const td = todayStr();
   if (!s.day || s.day.d !== td) {
-    s.day = { d: td, eat: [], w: 0, s: {}, supDoneAllDate: '' };
+    s.day = { d: td, eat: [], w: 0, s: {} };
   } else {
     s.day.eat = Array.isArray(s.day.eat) ? s.day.eat : [];
     s.day.w = num(s.day.w);
     s.day.s = s.day.s && typeof s.day.s === 'object' ? s.day.s : {};
-    s.day.supDoneAllDate = s.day.supDoneAllDate || '';
   }
   s.sup.forEach(item => {
     if (!item.id) item.id = 'sup_' + Math.random().toString(36).slice(2,8);
+    // ترحيل من الصيغ القديمة
+    if (item.iv && !item.freq) {
+      item.freq = num(item.iv) <= 1 ? 'daily' : 'every';
+      item.everyDays = num(item.iv) || 1;
+      item.last = item.ls || '';
+    }
+    if (item.freq === 'eod') { item.freq = 'every'; item.everyDays = 2; }
+    if (item.freq === 'custom') item.freq = 'every';
     if (!item.freq) item.freq = 'daily';
     if (!item.startDate) item.startDate = td;
-    if (!item.daysOfWeek) item.daysOfWeek = [0,2,4];
+    if (!Array.isArray(item.daysOfWeek) || !item.daysOfWeek.length) item.daysOfWeek = [0,2,4];
     if (!num(item.everyDays)) item.everyDays = 3;
+    if (item.last == null) item.last = '';
   });
   s.pr.forEach(p => {
     if (!p.cr) p.cr = td;
@@ -281,6 +311,7 @@ function loadState(){
       (d.items||[]).forEach(normalizeExItem);
     });
   });
+  resetStaleSets(s);
   return s;
 }
 
@@ -307,7 +338,8 @@ const dayTotals = () => S.day.eat.reduce((a,x)=>({
 function save(){
   const td = todayStr();
   if (S.day.d !== td) {
-    S.day = { d: td, eat: [], w: 0, s: {}, supDoneAllDate: '' };
+    S.day = { d: td, eat: [], w: 0, s: {} };
+    resetStaleSets(S);
   }
   const t = dayTotals();
   if (S.day.eat.length) {
@@ -324,7 +356,6 @@ function openProg(i){
   V.tab = 'prog';
   V.pIdx = i;
   V.report = '';
-  // Default all days collapsed so the screen stays compact; user clicks day header to expand
   V.openDays = {};
   render();
 }
@@ -336,65 +367,69 @@ function toggleDayAccordion(pIdx, dIdx){
 }
 
 // ---- Supplements Schedule & Day Completion ----
+// daily: كل يوم | weekly: أيام محددة | every: كل N يوم (تُحسب من آخر مرة أُخذت فيها)
 function isSupDueOn(sup, dateStr = todayStr()){
-  const start = sup.startDate || dateStr;
-  const diff = daysDiff(dateStr, start);
+  const diff = daysDiff(dateStr, sup.startDate || dateStr);
   if (diff < 0) return false;
   if (sup.freq === 'daily') return true;
-  if (sup.freq === 'eod') return diff % 2 === 0;
   if (sup.freq === 'weekly') {
     const dow = new Date(dateStr + 'T00:00:00').getDay();
     const list = Array.isArray(sup.daysOfWeek) && sup.daysOfWeek.length ? sup.daysOfWeek : [0];
     return list.includes(dow);
   }
-  if (sup.freq === 'custom') {
-    const step = Math.max(1, num(sup.everyDays) || 1);
-    return diff % step === 0;
-  }
-  return true;
+  const step = Math.max(1, num(sup.everyDays) || 1);
+  if (!sup.last || sup.last === dateStr) return true;
+  return daysDiff(dateStr, sup.last) >= step;
+}
+
+function supDaysLeft(sup){
+  if (sup.freq !== 'every' || !sup.last) return null;
+  const step = Math.max(1, num(sup.everyDays) || 1);
+  return Math.max(0, step - daysDiff(todayStr(), sup.last));
 }
 
 function freqLabel(sup){
   if (sup.freq === 'daily') return 'كل يوم';
-  if (sup.freq === 'eod') return 'يوم إي ويوم لا';
   if (sup.freq === 'weekly') {
     const names = ['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
     const arr = (sup.daysOfWeek||[]).map(d => names[d]).filter(Boolean);
     return 'أسبوعي (' + (arr.length ? arr.join('، ') : 'الأحد') + ')';
   }
-  return 'كل ' + (num(sup.everyDays)||1) + ' أيام';
+  const n = Math.max(1, num(sup.everyDays) || 1);
+  const f = FREQS.find(x => x[1] === n);
+  return f ? f[0] : 'كل ' + n + ' أيام';
 }
 
-function isSupTakenToday(sup){
-  return !!S.day.s[sup.id] || S.day.supDoneAllDate === todayStr();
+const isSupTakenToday = sup => !!S.day.s[sup.id];
+
+function markSup(sup, taken){
+  if (taken) {
+    if (!S.day.s[sup.id]) sup.prevLast = sup.last || '';
+    sup.last = todayStr();
+    S.day.s[sup.id] = true;
+  } else {
+    if (S.day.s[sup.id]) sup.last = sup.prevLast || '';
+    S.day.s[sup.id] = false;
+  }
 }
 
 function toggleSup(id){
   const sup = S.sup.find(x => x.id === id);
   if (!sup) return;
-  const current = isSupTakenToday(sup);
-  if (S.day.supDoneAllDate === todayStr() && current) {
-    S.day.supDoneAllDate = '';
-    S.sup.forEach(x => { if (isSupDueOn(x) && x.id !== id) S.day.s[x.id] = true; });
-    S.day.s[id] = false;
-  } else {
-    S.day.s[id] = !current;
-  }
+  markSup(sup, !isSupTakenToday(sup));
   commit();
 }
 
 function completeAllDueSupsToday(){
   const due = S.sup.filter(s => isSupDueOn(s));
   if (!due.length) { toast('لا توجد حبوب أو مكملات مستحقة اليوم'); return; }
-  due.forEach(s => { S.day.s[s.id] = true; });
-  S.day.supDoneAllDate = todayStr();
+  due.forEach(s => markSup(s, true));
   commit();
   toast('تم تسجيل إنجاز مكملات اليوم ✅');
 }
 
 function uncompleteAllSupsToday(){
-  S.day.supDoneAllDate = '';
-  S.sup.forEach(s => { S.day.s[s.id] = false; });
+  S.sup.forEach(s => { if (isSupDueOn(s)) markSup(s, false); });
   commit();
   toast('تم إلغاء إنجاز مكملات اليوم');
 }
@@ -419,6 +454,11 @@ function startTimer(sec, label){
     }, 1000)
   };
   renderTimer();
+}
+
+function startTimerFor(pIdx, dIdx, kIdx){
+  const it = S.pr[pIdx].days[dIdx].items[kIdx];
+  startTimer(it.t || 60, it.e);
 }
 
 function addTimer(delta){
@@ -460,14 +500,15 @@ const allExercises = () => {
 };
 const groupOf = n => (allExercises().find(x => x.n === n) || {}).g || 'صدر';
 
+// نسبة التقدم من الوزن فقط (متوسط أوزان الجولات مقابل وزن البداية)
 const calcPct = x => {
   normalizeExItem(x);
-  const curVol = calcSetsVolume(x.sets);
-  const baseVol = num(x.baseVol);
-  if (!baseVol) return 0;
-  return ((curVol - baseVol) / baseVol) * 100;
+  const b = num(x.baseW);
+  if (!b) return 0;
+  return ((avgW(x.sets) - b) / b) * 100;
 };
 
+// ملخص كامل (مع الأوزان) — للاستخدام الشخصي
 function formatSetsSummary(sets){
   if (!sets || !sets.length) return '';
   const allSameReps = sets.every(s => num(s.r) === num(sets[0].r));
@@ -476,6 +517,14 @@ function formatSetsSummary(sets){
     return `${sets.length}×${sets[0].r} (${sets[0].w}كغ)`;
   }
   return sets.map((s, i) => `ج${i+1}: ${s.r}×${s.w}كغ`).join(' | ');
+}
+
+// ملخص بدون أوزان — لتقرير الصديق
+function formatSetsRepsOnly(sets){
+  if (!sets || !sets.length) return '';
+  const allSame = sets.every(s => num(s.r) === num(sets[0].r));
+  if (allSame) return `${sets.length}×${sets[0].r}`;
+  return `${sets.length} جولات: ` + sets.map(s => s.r).join(' / ');
 }
 
 function addProgram(){
@@ -521,6 +570,7 @@ function addDay(pIdx){
 function deleteDay(pIdx, dIdx){
   if (!confirm('حذف هذا اليوم؟')) return;
   S.pr[pIdx].days.splice(dIdx, 1);
+  V.openDays = {};
   commit();
 }
 
@@ -548,7 +598,7 @@ function addExToDay(pIdx, dIdx){
     w: initSets[0].w,
     t: num(prev.t) || 60,
     sets: initSets,
-    baseVol: calcSetsVolume(initSets),
+    baseW: avgW(initSets),
     ss: '',
     done: '',
     n: ''
@@ -574,17 +624,17 @@ function changeSetCount(pIdx, dIdx, kIdx, newCount){
 }
 
 function updateSingleSet(pIdx, dIdx, kIdx, setIdx, field, val){
-  const it = S.pr[pIdx].days[dIdx].items[kIdx];
+  const p = S.pr[pIdx], day = p.days[dIdx];
+  const it = day.items[kIdx];
   normalizeExItem(it);
-  const v = num(val);
-  it.sets[setIdx][field] = v;
-  // If user edits set 1 and baseline was 0, initialize baseline
-  if (!num(it.baseVol) && calcSetsVolume(it.sets) > 0) {
-    it.baseVol = calcSetsVolume(it.sets);
-  }
+  it.sets[setIdx][field] = num(val);
+  // أول مرة يُدخل فيها وزن: يصبح هو وزن البداية
+  if (!num(it.baseW) && avgW(it.sets) > 0) it.baseW = avgW(it.sets);
   it.r = it.sets[0].r;
   it.w = it.sets[0].w;
   S.last[it.e] = { s: it.s, r: it.r, w: it.w, t: it.t, sets: it.sets.map(x => ({r:x.r, w:x.w})) };
+  // إذا التمرين مسجّل اليوم، حدّث السجل بالقيم الجديدة
+  if (it.done === todayStr()) logExerciseToHistory(p, day, it, it.n);
   save();
   render();
 }
@@ -598,7 +648,7 @@ function updateRestTime(pIdx, dIdx, kIdx, val){
 
 function logExerciseToHistory(p, day, it, note){
   const td = todayStr();
-  // Upsert: one record per (date + program + day + exercise) so clicking multiple times never duplicates in the log
+  // سجل واحد لكل (تاريخ + جدول + يوم + تمرين) حتى لا يتكرر
   const existingIdx = S.lw.findIndex(row => row.d === td && row.p === p.name && row.y === day.n && row.e === it.e);
   const record = {
     d: td,
@@ -615,16 +665,37 @@ function logExerciseToHistory(p, day, it, note){
   else S.lw.push(record);
 }
 
+function removeExerciseFromHistory(p, day, it){
+  const td = todayStr();
+  S.lw = S.lw.filter(row => !(row.d === td && row.p === p.name && row.y === day.n && row.e === it.e));
+}
+
 function toggleSetDone(pIdx, dIdx, kIdx, setIdx){
   const p = S.pr[pIdx];
   const day = p.days[dIdx];
   const it = day.items[kIdx];
   normalizeExItem(it);
-  it.sets[setIdx].done = !it.sets[setIdx].done;
+  const wasDone = !!it.sets[setIdx].done;
+  it.sets[setIdx].done = !wasDone;
+  it.sd = todayStr();
 
-  if (it.sets[setIdx].done && num(it.t) > 0) {
-    // Check if paired with another exercise in same superset group
-    const partner = it.ss ? day.items.find((other, idx) => idx !== kIdx && other.ss === it.ss && !(other.sets[setIdx] && other.sets[setIdx].done)) : null;
+  // إلغاء تحديد جولة: يرجع التمرين غير مكتمل ويُحذف من سجل اليوم
+  if (wasDone) {
+    if (it.done === todayStr()) {
+      it.done = '';
+      removeExerciseFromHistory(p, day, it);
+    }
+    commit();
+    return;
+  }
+
+  if (num(it.t) > 0) {
+    // شريك السوبر سيت: تمرين بنفس المجموعة لم يُكمل هذه الجولة بعد
+    const partner = it.ss ? day.items.find((other, idx) => {
+      if (idx === kIdx || other.ss !== it.ss) return false;
+      normalizeExItem(other);
+      return other.sets[setIdx] && !other.sets[setIdx].done;
+    }) : null;
     if (partner) {
       toast(`🔗 سوبر سيت #${it.ss}: انتقل الآن إلى ${partner.e}`);
     } else {
@@ -648,6 +719,7 @@ function finishExerciseNow(pIdx, dIdx, kIdx){
   const note = prompt('ملاحظة للتمرين اليوم (اختياري):', it.n || '');
   if (note === null) return;
   it.done = todayStr();
+  it.sd = todayStr();
   it.n = note;
   it.sets.forEach(st => st.done = true);
   S.last[it.e] = { s: it.sets.length, r: it.sets[0].r, w: it.sets[0].w, t: it.t, sets: it.sets.map(x => ({r:x.r, w:x.w})) };
@@ -659,8 +731,8 @@ function finishExerciseNow(pIdx, dIdx, kIdx){
 function resetCycleEx(pIdx, dIdx, kIdx){
   const it = S.pr[pIdx].days[dIdx].items[kIdx];
   normalizeExItem(it);
-  if (!confirm('بدء دورة جديدة لهذا التمرين بحيث تصبح الجولات والأوزان الحالية نقطة البداية (0%)؟')) return;
-  it.baseVol = calcSetsVolume(it.sets);
+  if (!confirm('بدء دورة جديدة لهذا التمرين بحيث يصبح الوزن الحالي نقطة البداية (0%)؟')) return;
+  it.baseW = avgW(it.sets);
   commit();
 }
 
@@ -734,9 +806,10 @@ function pairExercises(pIdx, dIdx, k1, k2){
   toast(`تم ربط «${ex1.e}» مع «${ex2.e}» في سوبر سيت #${grp} 🔗`);
 }
 
-function editMachineNote(exName){
-  const v = prompt('ملاحظة الجهاز أو المقعد (مثال: الكرسي رقم 4، الدرجة 5):', S.mn[exName] || '');
-  if (v !== null) { S.mn[exName] = v.trim(); commit(); }
+function editMachineNote(pIdx, dIdx, kIdx){
+  const name = S.pr[pIdx].days[dIdx].items[kIdx].e;
+  const v = prompt('ملاحظة الجهاز أو المقعد (مثال: الكرسي رقم 4، الدرجة 5):', S.mn[name] || '');
+  if (v !== null) { S.mn[name] = v.trim(); commit(); }
 }
 
 function removeEx(pIdx, dIdx, kIdx){
@@ -754,9 +827,10 @@ function buildProgReport(pIdx, friendMode){
     (d.items||[]).forEach(x => {
       normalizeExItem(x);
       const q = calcPct(x);
-      if (num(x.baseVol)) { sumPct += q; cnt++; }
+      if (num(x.baseW) > 0) { sumPct += q; cnt++; }
       vol += x.sets.reduce((s, st) => s + num(st.r) * num(st.w), 0);
-      const setsTxt = formatSetsSummary(x.sets);
+      // تقرير الصديق: جولات وعدات فقط، بدون أوزان ولا نسب
+      const setsTxt = friendMode ? formatSetsRepsOnly(x.sets) : formatSetsSummary(x.sets);
       out += ` - ${x.e}${x.ss ? ` [سوبر سيت #${x.ss}]` : ''}: ${setsTxt}` +
         (friendMode ? '' : ` | التقدم: ${q>=0?'+':''}${q.toFixed(0)}%`) + '\n';
     });
@@ -904,27 +978,26 @@ function openSupSheet(){
       <div>
         <label class="lbl">التكرار / الفترة</label>
         <select id="sp_freq" onchange="toggleSupFreqFields()">
-          <option value="daily">كل يوم</option>
-          <option value="eod">يوم إي ويوم لا</option>
-          <option value="weekly">أيام محددة كل أسبوع</option>
-          <option value="custom">كل X أيام</option>
+          ${FREQS.map(f => `<option value="${f[1]}">${f[0]}</option>`).join('')}
+          <option value="weekly">أيام محددة من الأسبوع</option>
+          <option value="other">مدة أخرى (أكتبها أنا) ✏️</option>
         </select>
       </div>
-      <div><label class="lbl">تاريخ البداية (لحساب الدور)</label><input id="sp_start" type="date" value="${td}"></div>
+      <div><label class="lbl">تاريخ البداية</label><input id="sp_start" type="date" value="${td}"></div>
     </div>
     <div id="sp_weeklyBox" style="display:none;margin-bottom:8px">
       <label class="lbl">اختر أيام الأسبوع</label>
       <div class="row-wrap">
         ${['أحد','إثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'].map((d,idx)=>`
           <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;background:var(--i);padding:5px 8px;border-radius:8px;cursor:pointer">
-            <input type="checkbox" class="sp_dow" value="${idx}" ${idx===0||idx===3?'checked':''}> ${d}
+            <input type="checkbox" class="sp_dow" value="${idx}" style="width:auto" ${idx===0||idx===3?'checked':''}> ${d}
           </label>
         `).join('')}
       </div>
     </div>
     <div id="sp_customBox" style="display:none;margin-bottom:8px">
       <label class="lbl">كل كم يوم؟</label>
-      <input id="sp_every" type="number" min="2" max="90" value="3">
+      <input id="sp_every" type="number" min="2" value="10">
     </div>
     <button style="width:100%" onclick="saveNewSup()">💾 حفظ المكمل</button>
   `);
@@ -933,22 +1006,27 @@ function openSupSheet(){
 function toggleSupFreqFields(){
   const v = $('#sp_freq').value;
   $('#sp_weeklyBox').style.display = v === 'weekly' ? 'block' : 'none';
-  $('#sp_customBox').style.display = v === 'custom' ? 'block' : 'none';
+  $('#sp_customBox').style.display = v === 'other' ? 'block' : 'none';
 }
 
 function saveNewSup(){
   const n = ($('#sp_n').value||'').trim();
   if (!n) { toast('اكتب اسم المكمل أو الحبة'); return; }
-  const freq = $('#sp_freq').value;
+  const v = $('#sp_freq').value;
+  let freq = 'daily', everyDays = 1;
+  if (v === 'weekly') freq = 'weekly';
+  else if (v === 'other') { freq = 'every'; everyDays = Math.max(2, Math.round(num($('#sp_every').value) || 2)); }
+  else { const d = Math.round(num(v)) || 1; if (d > 1) { freq = 'every'; everyDays = d; } }
   const dows = [...document.querySelectorAll('.sp_dow:checked')].map(x => num(x.value));
   S.sup.push({
     id: 'sup_' + Date.now().toString(36),
     n,
     d: ($('#sp_d').value||'').trim(),
     freq,
+    everyDays,
     startDate: $('#sp_start').value || todayStr(),
     daysOfWeek: dows.length ? dows : [0],
-    everyDays: Math.max(2, num($('#sp_every') && $('#sp_every').value) || 3)
+    last: ''
   });
   closeModal();
   commit();
@@ -1098,7 +1176,7 @@ function renderHome(){
     <div class="sec-title">الجداول التدريبية <span class="link" onclick="setTab('prog')">الكل ‹</span></div>
     <div class="hscroll">
       ${S.pr.length ? S.pr.map((p, i) => {
-        const items = (p.days||[]).flatMap(d => d.items||[]).filter(x => num(x.baseVol) > 0);
+        const items = (p.days||[]).flatMap(d => d.items||[]).filter(x => num(x.baseW) > 0);
         const avg = items.length ? Math.round(items.reduce((a,b)=>a+calcPct(b),0)/items.length) : 0;
         return `<div class="pcard" style="background:${grads[i%grads.length]}" onclick="openProg(${i})">
           <span class="tag">${p.act ? '⭐ معتمد' : (p.days||[]).length + ' أيام'}</span>
@@ -1160,7 +1238,7 @@ function renderProgList(){
       <button class="sm" onclick="addProgram()">+ جدول جديد</button>
     </div>
     ${S.pr.length ? S.pr.map((p, i) => {
-      const items = (p.days||[]).flatMap(d => d.items||[]).filter(x => num(x.baseVol) > 0);
+      const items = (p.days||[]).flatMap(d => d.items||[]).filter(x => num(x.baseW) > 0);
       const avg = items.length ? Math.round(items.reduce((a,b)=>a+calcPct(b),0)/items.length) : 0;
       return `<div class="card" style="cursor:pointer" onclick="openProg(${i})">
         <div class="row">
@@ -1180,7 +1258,6 @@ function renderProgDetail(){
   if (!p) return renderProgList();
   const exPool = allExercises();
   const groups = Object.keys(MUSCLE_COLORS);
-  const td = todayStr();
 
   return `
     <div class="row" style="margin-bottom:8px">
@@ -1205,7 +1282,8 @@ function renderProgDetail(){
     ${(p.days||[]).map((day, dIdx) => {
       const isOpen = !!V.openDays[`${pIdx}_${dIdx}`];
       const dayItems = day.items || [];
-      const doneCount = dayItems.filter(it => it.done === td || (Array.isArray(it.sets) && it.sets.length && it.sets.every(s=>s.done))).length;
+      dayItems.forEach(normalizeExItem);
+      const doneCount = dayItems.filter(it => it.sets.length && it.sets.every(s => s.done)).length;
 
       return `
       <div class="card" style="padding:12px 14px">
@@ -1228,11 +1306,12 @@ function renderProgDetail(){
         ${isOpen ? `
           <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--bd)">
             ${dayItems.map((it, kIdx) => {
-              normalizeExItem(it);
               const col = MUSCLE_COLORS[it.g] || '#7c3aed';
               const pct = calcPct(it);
-              const allSetsDone = it.sets.every(st => st.done) || it.done === td;
+              const allSetsDone = it.sets.every(st => st.done);
               const mNote = S.mn[it.e];
+              const baseW = num(it.baseW);
+              const curW = avgW(it.sets);
               const partnerNames = it.ss
                 ? dayItems.filter((o, idx) => idx !== kIdx && o.ss === it.ss).map(o => o.e)
                 : [];
@@ -1246,6 +1325,7 @@ function renderProgDetail(){
                   </div>
                   <b style="color:var(--o)">${pct>=0?'+':''}${pct.toFixed(0)}%</b>
                 </div>
+                ${baseW > 0 ? `<div class="muted" style="margin-top:2px">بدأت بـ ${+baseW.toFixed(1)} كغ · الآن (متوسط الجولات) ${+curW.toFixed(1)} كغ</div>` : ''}
 
                 <div class="grid2" style="margin-top:8px">
                   <div>
@@ -1275,7 +1355,7 @@ function renderProgDetail(){
                 </div>
 
                 <div class="muted" style="margin-bottom:8px">
-                  <span style="cursor:pointer;color:var(--o)" onclick="startTimer(${it.t||60},'${esc(it.e).replace(/'/g,'')}')">⏱ مؤقت راحة ${it.t||60}ث</span>
+                  <span style="cursor:pointer;color:var(--o)" onclick="startTimerFor(${pIdx},${dIdx},${kIdx})">⏱ مؤقت راحة ${it.t||60}ث</span>
                   ${mNote ? ` · 🛠 ${esc(mNote)}` : ''}
                   ${it.n ? ` · 📝 ${esc(it.n)}` : ''}
                 </div>
@@ -1284,7 +1364,7 @@ function renderProgDetail(){
                   <button class="sm ok" onclick="finishExerciseNow(${pIdx},${dIdx},${kIdx})">تم ✓</button>
                   <button class="sm x" onclick="openSupersetModal(${pIdx},${dIdx},${kIdx})">🔗 ${it.ss ? 'سوبر سيت #' + it.ss : 'ربط سوبر سيت'}</button>
                   <button class="sm x" onclick="resetCycleEx(${pIdx},${dIdx},${kIdx})" title="تصفير التقدم">🔄 دورة</button>
-                  <button class="sm x" onclick="editMachineNote('${esc(it.e).replace(/'/g,'')}')">🛠 جهاز</button>
+                  <button class="sm x" onclick="editMachineNote(${pIdx},${dIdx},${kIdx})">🛠 جهاز</button>
                   <button class="sm x" onclick="moveEx(${pIdx},${dIdx},${kIdx},-1)">↑</button>
                   <button class="sm x" onclick="moveEx(${pIdx},${dIdx},${kIdx},1)">↓</button>
                   <button class="sm x" onclick="removeEx(${pIdx},${dIdx},${kIdx})">✕</button>
@@ -1314,12 +1394,9 @@ function renderProgDetail(){
   `;
 }
 
-function renderFood(){
-  const t = dayTotals();
-  const g = S.goal;
-  const cats = ['الكل','⭐',...FOOD_CATS];
+// قائمة الأصناف تُحدَّث لوحدها أثناء البحث حتى لا يضيع التركيز من خانة الكتابة
+function foodListHtml(){
   const q = (V.q || '').trim().toLowerCase();
-
   const filtered = S.foods
     .map((f, idx) => ({ f, idx }))
     .filter(({ f }) => {
@@ -1328,6 +1405,36 @@ function renderFood(){
       return catOk && qOk;
     })
     .sort((a,b) => (b.f.v?1:0) - (a.f.v?1:0));
+
+  if (!filtered.length) return '<div class="card-soft muted">لا توجد أصناف مطابقة. استخدم «+ صنف جديد» لإضافتها.</div>';
+
+  return filtered.map(({ f, idx }) => `
+    <div class="card-soft row">
+      <div style="flex:1">
+        <div class="row-wrap">
+          <span style="cursor:pointer;font-size:16px" onclick="S.foods[${idx}].v=!S.foods[${idx}].v;commit()">${f.v?'⭐':'☆'}</span>
+          <b>${esc(f.n)}</b>
+          <span class="muted">(${esc(f.u)})</span>
+        </div>
+        <div class="muted" style="margin-top:2px">${f.k} سعرة · بروتين ${f.p}غ · كارب ${f.h}غ · دهون ${f.f}غ</div>
+      </div>
+      <div class="row-wrap">
+        <button class="sm" onclick="quickEat(${idx},1)" title="إضافة وحدة واحدة">+1</button>
+        <button class="sm x" onclick="openAddFoodSheet(${idx},1)" title="تحديد كمية أو تعديل">كمية / ✎</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function updateFoodList(){
+  const el = $('#foodList');
+  if (el) el.innerHTML = foodListHtml();
+}
+
+function renderFood(){
+  const t = dayTotals();
+  const g = S.goal;
+  const cats = ['الكل','⭐',...FOOD_CATS];
 
   return `
     <div class="card">
@@ -1370,29 +1477,14 @@ function renderFood(){
     ` : ''}
 
     <div style="margin-bottom:8px">
-      <input placeholder="ابحث عن صنف غذائي (دجاج، رز، شوفان، تمر...)" value="${esc(V.q)}" oninput="V.q=this.value;render()">
+      <input placeholder="ابحث عن صنف غذائي (دجاج، رز، شوفان، تمر...)" value="${esc(V.q)}" oninput="V.q=this.value;updateFoodList()">
     </div>
 
     <div class="chips">
       ${cats.map(c => `<button class="chip ${V.cat===c?'on':''}" onclick="V.cat='${c}';render()">${c}</button>`).join('')}
     </div>
 
-    ${filtered.map(({ f, idx }) => `
-      <div class="card-soft row">
-        <div style="flex:1">
-          <div class="row-wrap">
-            <span style="cursor:pointer;font-size:16px" onclick="S.foods[${idx}].v=!S.foods[${idx}].v;commit()">${f.v?'⭐':'☆'}</span>
-            <b>${esc(f.n)}</b>
-            <span class="muted">(${esc(f.u)})</span>
-          </div>
-          <div class="muted" style="margin-top:2px">${f.k} سعرة · بروتين ${f.p}غ · كارب ${f.h}غ · دهون ${f.f}غ</div>
-        </div>
-        <div class="row-wrap">
-          <button class="sm" onclick="quickEat(${idx},1)" title="إضافة وحدة واحدة">+1</button>
-          <button class="sm x" onclick="openAddFoodSheet(${idx},1)" title="تحديد كمية أو تعديل">كمية / ✎</button>
-        </div>
-      </div>
-    `).join('')}
+    <div id="foodList">${foodListHtml()}</div>
   `;
 }
 
@@ -1417,7 +1509,7 @@ function renderSup(){
 
       ${dueList.length ? `
         <div class="row-wrap" style="margin-bottom:8px">
-          <button class="ok ${allDueDone?'x':''}" style="flex:1" onclick="${allDueDone?'uncompleteAllSupsToday()':'completeAllDueSupsToday()'}">
+          <button class="${allDueDone?'x':'ok'}" style="flex:1" onclick="${allDueDone?'uncompleteAllSupsToday()':'completeAllDueSupsToday()'}">
             ${allDueDone ? '✓ تم إنجاز مكملات اليوم (إلغاء؟)' : '✅ تم إنجاز اليوم لمكملات اليوم'}
           </button>
         </div>
@@ -1445,11 +1537,12 @@ function renderSup(){
         <div class="muted" style="margin:12px 0 6px;font-weight:700">غير مستحقة اليوم حسب الجدول</div>
         ${restList.map(s => {
           const idx = S.sup.indexOf(s);
+          const left = supDaysLeft(s);
           return `<div class="card-soft row" style="opacity:.78">
             <div>
               <b>${esc(s.n)}</b> ${s.d ? `<span class="muted">(${esc(s.d)})</span>` : ''}
               <div style="margin-top:4px">
-                <span class="pill-status st-rest">اليوم مو موعدها</span>
+                <span class="pill-status st-rest">اليوم مو موعدها${left ? ' — باقي ' + left + ' يوم' : ''}</span>
                 <span class="muted" style="margin-right:6px">${esc(freqLabel(s))}</span>
               </div>
             </div>
@@ -1458,7 +1551,7 @@ function renderSup(){
         }).join('')}
       ` : ''}
 
-      ${!S.sup.length ? '<div class="muted">لا توجد حبوب أو مكملات مضافة بعد. اضغط «+ إضافة مكمل» لتحديد الجرعة والفترة (كل يوم، يوم إي يوم لا، كل أسبوع...).</div>' : ''}
+      ${!S.sup.length ? '<div class="muted">لا توجد حبوب أو مكملات مضافة بعد. اضغط «+ إضافة مكمل» لتحديد الجرعة والفترة (كل يوم، يوم إي يوم لا، كل أسبوع، كل شهر...).</div>' : ''}
     </div>
 
     <div class="card">
@@ -1494,7 +1587,7 @@ function renderLog(){
   const curMo = V.mo || months[0];
   const foodDays = Object.keys(S.lf).filter(d => d.slice(0,7) === curMo).sort().reverse();
 
-  // Group workout logs by date (سجل اليوم بدلاً من بطاقة منفصلة لكل تمرين)
+  // سجل التمارين مجمّع حسب اليوم
   const monthWorkouts = S.lw.filter(x => (x.d||'').slice(0,7) === curMo);
   const byDate = {};
   monthWorkouts.forEach(x => {

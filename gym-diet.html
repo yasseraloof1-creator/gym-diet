@@ -269,6 +269,7 @@ function loadState(){
   s.last = s.last && typeof s.last === 'object' ? s.last : {};
   s.mn = s.mn && typeof s.mn === 'object' ? s.mn : {};
   s.lw = Array.isArray(s.lw) ? s.lw : [];
+  { const seen = {}; s.lw.forEach(x => { seen[x.d + '|' + x.p + '|' + x.y + '|' + x.e] = x; }); s.lw = Object.values(seen); }
   s.lf = s.lf && typeof s.lf === 'object' ? s.lf : {};
   s.sup = Array.isArray(s.sup) ? s.sup : [];
   s.body = Array.isArray(s.body) ? s.body : [];
@@ -316,7 +317,7 @@ function loadState(){
 }
 
 let S = loadState();
-let V = { tab: 'home', pIdx: -1, openDays: {}, cat: 'الكل', q: '', sg: '', mo: '', report: '', backupText: '' };
+let V = { tab: 'home', pIdx: -1, openDays: {}, cat: 'الكل', q: '', sg: '', mo: '', report: '', backupText: '', logView: '', openLogDays: {} };
 let timerState = { rem: 0, total: 60, label: '', iv: null };
 let toastTimer = null;
 
@@ -351,7 +352,7 @@ function save(){
 }
 
 function commit(){ save(); render(); }
-function setTab(t){ V.tab = t; V.pIdx = -1; V.report = ''; render(); }
+function setTab(t){ V.tab = t; V.pIdx = -1; V.report = ''; V.logView = ''; V.openLogDays = {}; render(); }
 function openProg(i){
   V.tab = 'prog';
   V.pIdx = i;
@@ -1577,6 +1578,8 @@ function renderSup(){
   `;
 }
 
+function toggleLogDay(d){ V.openLogDays[d] = !V.openLogDays[d]; render(); }
+
 function renderLog(){
   const months = [...new Set([
     ...S.lw.map(x => (x.d||'').slice(0,7)),
@@ -1586,73 +1589,93 @@ function renderLog(){
 
   const curMo = V.mo || months[0];
   const foodDays = Object.keys(S.lf).filter(d => d.slice(0,7) === curMo).sort().reverse();
-
-  // سجل التمارين مجمّع حسب اليوم
-  const monthWorkouts = S.lw.filter(x => (x.d||'').slice(0,7) === curMo);
   const byDate = {};
-  monthWorkouts.forEach(x => {
-    if (!byDate[x.d]) byDate[x.d] = [];
-    byDate[x.d].push(x);
-  });
+  S.lw.filter(x => (x.d||'').slice(0,7) === curMo).forEach(x => { (byDate[x.d] = byDate[x.d] || []).push(x); });
   const workoutDays = Object.keys(byDate).sort().reverse();
 
-  return `
-    <div class="row" style="margin-bottom:8px">
-      <h2 style="margin:0">📈 السجل التاريخي</h2>
-      <div class="row-wrap">
-        <button class="sm x" onclick="clearMonthLog('${curMo}')">مسح الشهر</button>
-        <button class="sm x" onclick="clearAllLog()">مسح الكل</button>
+  const chips = `<div class="chips">
+    ${months.map(m => `<button class="chip ${m===curMo?'on':''}" onclick="V.mo='${m}';V.openLogDays={};render()">${m}</button>`).join('')}
+  </div>`;
+
+  const clearBtns = `<div class="row-wrap">
+    <button class="sm x" onclick="clearMonthLog('${curMo}')">مسح الشهر</button>
+    <button class="sm x" onclick="clearAllLog()">مسح الكل</button>
+  </div>`;
+
+  // ---- داخل سجل الأكل
+  if (V.logView === 'food') {
+    return `
+      <div class="row" style="margin-bottom:8px">
+        <button class="sm x" onclick="V.logView='';render()">→ السجل</button>
+        <h2 style="margin:0">🍽️ سجل الأكل</h2>
       </div>
-    </div>
-
-    <div class="chips">
-      ${months.map(m => `<button class="chip ${m===curMo?'on':''}" onclick="V.mo='${m}';render()">${m}</button>`).join('')}
-    </div>
-
-    <div class="card">
-      <h3 style="margin:0 0 8px">🍽️ سجل الأكل</h3>
+      ${chips}
       ${foodDays.length ? foodDays.map(d => {
         const info = S.lf[d];
         return `<div class="card-soft">
           <b>${esc(d)}</b> · <span style="color:var(--o);font-weight:700">${info.k} سعرة</span> · بروتين ${info.p}غ
           <div class="muted" style="margin-top:2px">${(info.i||[]).map(esc).join('، ')}</div>
         </div>`;
-      }).join('') : '<div class="muted">لا توجد سجلات أكل في هذا الشهر.</div>'}
-    </div>
+      }).join('') : '<div class="card muted">لا توجد سجلات أكل في هذا الشهر.</div>'}
+    `;
+  }
 
-    <div class="card">
-      <h3 style="margin:0 0 8px">🏋️ سجل التمارين (حسب اليوم)</h3>
+  // ---- داخل سجل التمارين: الأيام مسكّرة، اضغط على اليوم لتظهر تمارينه
+  if (V.logView === 'work') {
+    return `
+      <div class="row" style="margin-bottom:8px">
+        <button class="sm x" onclick="V.logView='';V.openLogDays={};render()">→ السجل</button>
+        <h2 style="margin:0">🏋️ سجل التمارين</h2>
+      </div>
+      ${chips}
       ${workoutDays.length ? workoutDays.map(dateStr => {
         const list = byDate[dateStr];
+        const open = !!V.openLogDays[dateStr];
         const dayTitle = [...new Set(list.map(x => `${x.p}${x.y ? ' / ' + x.y : ''}`))].join(' ، ');
         const totalVol = list.reduce((sum, x) => {
-          if (Array.isArray(x.sets) && x.sets.length) {
-            return sum + x.sets.reduce((a, st) => a + num(st.r) * num(st.w), 0);
-          }
+          if (Array.isArray(x.sets) && x.sets.length) return sum + x.sets.reduce((a, st) => a + num(st.r) * num(st.w), 0);
           return sum + num(x.s) * num(x.r) * num(x.w);
         }, 0);
-
-        return `<div class="card-soft">
-          <div class="row" style="margin-bottom:6px">
+        return `<div class="card" style="padding:12px 14px">
+          <div class="day-acc-head ${open?'open':''}" onclick="toggleLogDay('${dateStr}')">
             <div>
               <b>📅 ${esc(dateStr)}</b>
               <div class="muted">${esc(dayTitle)} · ${list.length} تمارين${totalVol > 0 ? ` · حجم ${Math.round(totalVol).toLocaleString()} كغ` : ''}</div>
             </div>
-            <button class="sm x" onclick="deleteWorkoutDayLog('${dateStr}')" title="حذف سجل هذا اليوم">🗑</button>
+            <div class="row-wrap">
+              <button class="sm x" onclick="event.stopPropagation();deleteWorkoutDayLog('${dateStr}')" title="حذف سجل هذا اليوم">🗑</button>
+              <span class="chev">▼</span>
+            </div>
           </div>
-          <div style="border-top:1px solid var(--bd);padding-top:6px;display:flex;flex-direction:column;gap:4px">
+          ${open ? `<div style="border-top:1px solid var(--bd);margin-top:10px;padding-top:8px;display:flex;flex-direction:column;gap:5px">
             ${list.map(x => {
-              const summary = Array.isArray(x.sets) && x.sets.length
-                ? formatSetsSummary(x.sets)
-                : `${x.s}×${x.r} (${x.w}كغ)`;
-              return `<div style="font-size:12.5px">
-                • <b>${esc(x.e)}</b>: <span class="muted">${esc(summary)}</span>
-                ${x.n ? `<span class="muted"> · 📝 ${esc(x.n)}</span>` : ''}
-              </div>`;
+              const summary = Array.isArray(x.sets) && x.sets.length ? formatSetsSummary(x.sets) : `${x.s}×${x.r} (${x.w}كغ)`;
+              return `<div style="font-size:12.5px">• <b>${esc(x.e)}</b>: <span class="muted">${esc(summary)}</span>${x.n ? `<span class="muted"> · 📝 ${esc(x.n)}</span>` : ''}</div>`;
             }).join('')}
-          </div>
+          </div>` : ''}
         </div>`;
-      }).join('') : '<div class="muted">لا توجد تمارين مسجلة في هذا الشهر.</div>'}
+      }).join('') : '<div class="card muted">لا توجد تمارين مسجلة في هذا الشهر.</div>'}
+    `;
+  }
+
+  // ---- الصفحة الرئيسية للسجل: مربعين
+  return `
+    <div class="row" style="margin-bottom:8px">
+      <h2 style="margin:0">📈 السجل</h2>
+      ${clearBtns}
+    </div>
+    ${chips}
+    <div class="grid2" style="margin-top:6px">
+      <div class="card" style="cursor:pointer;text-align:center;margin:0;padding:22px 10px" onclick="V.logView='food';render()">
+        <div style="font-size:36px">🍽️</div>
+        <b style="font-size:16px">سجل الأكل</b>
+        <div class="muted" style="margin-top:4px">${foodDays.length} يوم مسجّل</div>
+      </div>
+      <div class="card" style="cursor:pointer;text-align:center;margin:0;padding:22px 10px" onclick="V.logView='work';render()">
+        <div style="font-size:36px">🏋️</div>
+        <b style="font-size:16px">سجل التمارين</b>
+        <div class="muted" style="margin-top:4px">${workoutDays.length} يوم تمرين</div>
+      </div>
     </div>
   `;
 }

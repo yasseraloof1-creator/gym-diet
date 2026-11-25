@@ -268,6 +268,7 @@ function loadState(){
   s.pr = Array.isArray(s.pr) ? s.pr : [];
   s.last = s.last && typeof s.last === 'object' ? s.last : {};
   s.mn = s.mn && typeof s.mn === 'object' ? s.mn : {};
+  s.gmap = s.gmap && typeof s.gmap === 'object' ? s.gmap : {};
   s.lw = Array.isArray(s.lw) ? s.lw : [];
   { const seen = {}; s.lw.forEach(x => { seen[x.d + '|' + x.p + '|' + x.y + '|' + x.e] = x; }); s.lw = Object.values(seen); }
   s.lf = s.lf && typeof s.lf === 'object' ? s.lf : {};
@@ -500,7 +501,7 @@ function closeModal(){ $('#modalRoot').classList.remove('open'); $('#modalSheet'
 // ---- Workout Logic ----
 const allExercises = () => {
   const base = Object.entries(DEFAULT_EX).flatMap(([g, arr]) => arr.map(n => ({ n, g })));
-  return base.concat(S.ex);
+  return base.concat(S.ex).map(x => ({ n: x.n, g: S.gmap[x.n] || x.g }));
 };
 const groupOf = n => (allExercises().find(x => x.n === n) || {}).g || 'صدر';
 
@@ -579,6 +580,36 @@ function deleteDay(pIdx, dIdx){
   commit();
 }
 
+function regroupFromItem(pIdx, dIdx, kIdx){
+  V.rg = S.pr[pIdx].days[dIdx].items[kIdx].e; V.rgBack = false; renderRegroup();
+}
+function regroupFromList(i){
+  V.rg = V.addEx.list[i]; V.rgBack = true; renderRegroup();
+}
+function renderRegroup(){
+  const cur = groupOf(V.rg);
+  openModal(`
+    <h3 style="margin:0 0 4px">🏷️ تغيير التصنيف</h3>
+    <p class="muted" style="margin:0 0 10px">${esc(V.rg)} — التصنيف الحالي: <b>${esc(cur)}</b></p>
+    <div class="grid2">
+      ${Object.keys(MUSCLE_COLORS).map(g => `<button class="${g===cur?'':'x'}" style="${g===cur?'background:'+MUSCLE_COLORS[g]:'border-right:4px solid '+MUSCLE_COLORS[g]}" onclick="setExGroup('${g}')">${g}${g===cur?' ✓':''}</button>`).join('')}
+    </div>
+    <button class="x" style="width:100%;margin-top:10px" onclick="${V.rgBack?'renderAddEx()':'closeModal()'}">إلغاء</button>
+  `);
+}
+function setExGroup(g){
+  const name = V.rg;
+  S.gmap[name] = g;
+  const ce = S.ex.find(x => x.n === name);
+  if (ce) ce.g = g;
+  S.pr.forEach(p => (p.days || []).forEach(d => (d.items || []).forEach(it => { if (it.e === name) it.g = g; })));
+  save();
+  render();
+  if (V.rgBack && V.addEx) { V.rgBack = false; renderAddEx(); }
+  else closeModal();
+  toast(`تم نقل «${name}» إلى ${g} ✅`);
+}
+
 function pushExercise(pIdx, dIdx, name, g){
   name = (name || '').trim();
   if (!name) return false;
@@ -632,7 +663,10 @@ function renderAddEx(){
       ${a.list.map((n, i) => `
         <div class="card-soft row" style="border-right:4px solid ${MUSCLE_COLORS[a.g]}">
           <b>${esc(n)}</b>
-          <button class="sm" onclick="addExPick(${i})">+ إضافة</button>
+          <span class="row-wrap">
+            <button class="sm x" onclick="regroupFromList(${i})" title="تغيير التصنيف">🏷️</button>
+            <button class="sm" onclick="addExPick(${i})">+ إضافة</button>
+          </span>
         </div>
       `).join('')}
       <button class="x" style="width:100%;margin-top:8px" onclick="addExCustomStep('${a.g}')">✍️ تمرين من عندي (أكتب اسمه)</button>
@@ -1441,6 +1475,7 @@ function renderProgDetail(){
                   <button class="sm ok" onclick="finishExerciseNow(${pIdx},${dIdx},${kIdx})">تم ✓</button>
                   <button class="sm x" onclick="openSupersetModal(${pIdx},${dIdx},${kIdx})">🔗 ${it.ss ? 'سوبر سيت #' + it.ss : 'ربط سوبر سيت'}</button>
                   <button class="sm x" onclick="resetCycleEx(${pIdx},${dIdx},${kIdx})" title="تصفير التقدم">🔄 دورة</button>
+                  <button class="sm x" onclick="regroupFromItem(${pIdx},${dIdx},${kIdx})">🏷️ تصنيف</button>
                   <button class="sm x" onclick="editMachineNote(${pIdx},${dIdx},${kIdx})">🛠 جهاز</button>
                   <button class="sm x" onclick="moveEx(${pIdx},${dIdx},${kIdx},-1)">↑</button>
                   <button class="sm x" onclick="moveEx(${pIdx},${dIdx},${kIdx},1)">↓</button>

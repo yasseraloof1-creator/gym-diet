@@ -317,7 +317,7 @@ function loadState(){
 }
 
 let S = loadState();
-let V = { tab: 'home', pIdx: -1, openDays: {}, cat: 'الكل', q: '', sg: '', mo: '', report: '', backupText: '', logView: '', openLogDays: {} };
+let V = { tab: 'home', pIdx: -1, openDays: {}, cat: 'الكل', q: '', sg: '', mo: '', report: '', backupText: '', logView: '', openLogDays: {}, openEx: {} };
 let timerState = { rem: 0, total: 60, label: '', iv: null };
 let toastTimer = null;
 
@@ -358,8 +358,11 @@ function openProg(i){
   V.pIdx = i;
   V.report = '';
   V.openDays = {};
+  V.openEx = {};
   render();
 }
+
+function toggleEx(k){ V.openEx[k] = !V.openEx[k]; render(); }
 
 function toggleDayAccordion(pIdx, dIdx){
   const key = `${pIdx}_${dIdx}`;
@@ -572,6 +575,7 @@ function deleteDay(pIdx, dIdx){
   if (!confirm('حذف هذا اليوم؟')) return;
   S.pr[pIdx].days.splice(dIdx, 1);
   V.openDays = {};
+  V.openEx = {};
   commit();
 }
 
@@ -605,6 +609,7 @@ function addExToDay(pIdx, dIdx){
     n: ''
   });
   V.openDays[`${pIdx}_${dIdx}`] = true;
+  V.openEx[`${pIdx}_${dIdx}_${S.pr[pIdx].days[dIdx].items.length - 1}`] = true;
   commit();
 }
 
@@ -742,6 +747,8 @@ function moveEx(pIdx, dIdx, kIdx, dir){
   const j = kIdx + dir;
   if (j < 0 || j >= arr.length) return;
   [arr[kIdx], arr[j]] = [arr[j], arr[kIdx]];
+  const k1 = `${pIdx}_${dIdx}_${kIdx}`, k2 = `${pIdx}_${dIdx}_${j}`;
+  const tmp = V.openEx[k1]; V.openEx[k1] = V.openEx[k2]; V.openEx[k2] = tmp;
   commit();
 }
 
@@ -815,6 +822,7 @@ function editMachineNote(pIdx, dIdx, kIdx){
 
 function removeEx(pIdx, dIdx, kIdx){
   S.pr[pIdx].days[dIdx].items.splice(kIdx, 1);
+  V.openEx = {};
   commit();
 }
 
@@ -1308,6 +1316,7 @@ function renderProgDetail(){
           <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--bd)">
             ${dayItems.map((it, kIdx) => {
               const col = MUSCLE_COLORS[it.g] || '#7c3aed';
+              const exOpen = !!V.openEx[`${pIdx}_${dIdx}_${kIdx}`];
               const pct = calcPct(it);
               const allSetsDone = it.sets.every(st => st.done);
               const mNote = S.mn[it.e];
@@ -1318,14 +1327,18 @@ function renderProgDetail(){
                 : [];
 
               return `<div class="ex-card ${allSetsDone?'done-today':''}" style="border-right-color:${col}">
-                <div class="row">
+                <div class="row" style="cursor:pointer" onclick="toggleEx('${pIdx}_${dIdx}_${kIdx}')">
                   <div>
                     <b style="font-size:15px">${esc(it.e)}</b>
                     ${it.ss ? `<span class="pill-status st-ss${it.ss}">🔗 سوبر سيت #${it.ss}${partnerNames.length ? ' مع ' + esc(partnerNames.join('، ')) : ''}</span>` : ''}
                     ${allSetsDone ? '<span class="pill-status st-ok">✓ مكتمل</span>' : ''}
                   </div>
-                  <b style="color:var(--o)">${pct>=0?'+':''}${pct.toFixed(0)}%</b>
+                  <div class="row-wrap">
+                    <b style="color:var(--o)">${pct>=0?'+':''}${pct.toFixed(0)}%</b>
+                    <span style="font-size:12px;color:var(--m);display:inline-block;transform:rotate(${exOpen?180:0}deg)">▼</span>
+                  </div>
                 </div>
+                ${exOpen ? `<div>
                 ${baseW > 0 ? `<div class="muted" style="margin-top:2px">بدأت بـ ${+baseW.toFixed(1)} كغ · الآن (متوسط الجولات) ${+curW.toFixed(1)} كغ</div>` : ''}
 
                 <div class="grid2" style="margin-top:8px">
@@ -1370,6 +1383,7 @@ function renderProgDetail(){
                   <button class="sm x" onclick="moveEx(${pIdx},${dIdx},${kIdx},1)">↓</button>
                   <button class="sm x" onclick="removeEx(${pIdx},${dIdx},${kIdx})">✕</button>
                 </div>
+                </div>` : ''}
               </div>`;
             }).join('')}
 

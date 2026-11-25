@@ -317,7 +317,7 @@ function loadState(){
 }
 
 let S = loadState();
-let V = { tab: 'home', pIdx: -1, openDays: {}, cat: 'الكل', q: '', sg: '', mo: '', report: '', backupText: '', logView: '', openLogDays: {}, openEx: {} };
+let V = { tab: 'home', pIdx: -1, openDays: {}, cat: 'الكل', q: '', sg: '', mo: '', report: '', backupText: '', logView: '', openLogDays: {}, openEx: {}, addEx: null };
 let timerState = { rem: 0, total: 60, label: '', iv: null };
 let toastTimer = null;
 
@@ -362,7 +362,7 @@ function openProg(i){
   render();
 }
 
-function toggleEx(k){ V.openEx[k] = !V.openEx[k]; render(); }
+function toggleEx(k){ const was = !!V.openEx[k]; V.openEx = was ? {} : { [k]: true }; render(); }
 
 function toggleDayAccordion(pIdx, dIdx){
   const key = `${pIdx}_${dIdx}`;
@@ -579,38 +579,101 @@ function deleteDay(pIdx, dIdx){
   commit();
 }
 
-function addExToDay(pIdx, dIdx){
-  const sel = $(`#sx_${pIdx}_${dIdx}`).value;
-  const nw = $(`#nx_${pIdx}_${dIdx}`).value.trim();
-  const gx = $(`#gx_${pIdx}_${dIdx}`).value;
-  let name = sel, g = groupOf(sel);
-  if (nw) {
-    name = nw;
-    g = groupOf(nw) || gx;
-    if (!allExercises().some(x => x.n === nw)) S.ex.push({ n: nw, g });
-  }
-  if (!name) return;
+function pushExercise(pIdx, dIdx, name, g){
+  name = (name || '').trim();
+  if (!name) return false;
+  if (!allExercises().some(x => x.n === name)) S.ex.push({ n: name, g });
   const prev = S.last[name] || {};
   const initSets = Array.isArray(prev.sets) && prev.sets.length
     ? prev.sets.map(st => ({ r: num(st.r)||10, w: num(st.w)||0, done: false }))
     : makeSets(num(prev.s)||3, num(prev.r)||10, num(prev.w)||0);
-
-  S.pr[pIdx].days[dIdx].items.push({
-    e: name,
-    g,
+  const items = S.pr[pIdx].days[dIdx].items;
+  items.push({
+    e: name, g,
     s: initSets.length,
     r: initSets[0].r,
     w: initSets[0].w,
     t: num(prev.t) || 60,
     sets: initSets,
     baseW: avgW(initSets),
-    ss: '',
-    done: '',
-    n: ''
+    ss: '', done: '', n: ''
   });
   V.openDays[`${pIdx}_${dIdx}`] = true;
-  V.openEx[`${pIdx}_${dIdx}_${S.pr[pIdx].days[dIdx].items.length - 1}`] = true;
+  V.openEx = { [`${pIdx}_${dIdx}_${items.length - 1}`]: true };
+  return true;
+}
+
+function openAddEx(pIdx, dIdx){
+  V.addEx = { p: pIdx, d: dIdx, step: 1, g: '', list: [] };
+  renderAddEx();
+}
+
+function renderAddEx(){
+  const a = V.addEx;
+  if (!a) return;
+  const groups = Object.keys(MUSCLE_COLORS);
+  let h = '';
+  if (a.step === 1) {
+    h = `
+      <h3 style="margin:0 0 4px">➕ إضافة تمرين</h3>
+      <p class="muted" style="margin:0 0 10px">اختر العضلة المستهدفة:</p>
+      <div class="grid2">
+        ${groups.map(g => `<button style="background:${MUSCLE_COLORS[g]};padding:14px 8px;font-size:15px" onclick="addExGroup('${g}')">${g}</button>`).join('')}
+      </div>
+      <button class="x" style="width:100%;margin-top:12px" onclick="addExCustomStep('')">✍️ تمرين من عندي (أكتب اسمه)</button>
+    `;
+  } else if (a.step === 2) {
+    a.list = allExercises().filter(x => x.g === a.g).map(x => x.n);
+    h = `
+      <div class="row" style="margin-bottom:10px">
+        <button class="sm x" onclick="V.addEx.step=1;renderAddEx()">→ العضلات</button>
+        <h3 style="margin:0">تمارين ${esc(a.g)}</h3>
+      </div>
+      ${a.list.map((n, i) => `
+        <div class="card-soft row" style="border-right:4px solid ${MUSCLE_COLORS[a.g]}">
+          <b>${esc(n)}</b>
+          <button class="sm" onclick="addExPick(${i})">+ إضافة</button>
+        </div>
+      `).join('')}
+      <button class="x" style="width:100%;margin-top:8px" onclick="addExCustomStep('${a.g}')">✍️ تمرين من عندي (أكتب اسمه)</button>
+    `;
+  } else {
+    h = `
+      <div class="row" style="margin-bottom:10px">
+        <button class="sm x" onclick="V.addEx.step=1;renderAddEx()">→ رجوع</button>
+        <h3 style="margin:0">✍️ تمرين جديد</h3>
+      </div>
+      <div style="margin-bottom:10px"><label class="lbl">اسم التمرين</label><input id="ax_name" placeholder="اكتب اسم التمرين"></div>
+      <div style="margin-bottom:12px">
+        <label class="lbl">التصنيف (العضلة)</label>
+        <select id="ax_g">${groups.map(g => `<option ${g === (a.g || 'صدر') ? 'selected' : ''}>${g}</option>`).join('')}</select>
+      </div>
+      <button style="width:100%" onclick="addExCustomSave()">💾 حفظ وإضافة لليوم</button>
+    `;
+  }
+  openModal(h);
+}
+
+function addExGroup(g){ V.addEx.g = g; V.addEx.step = 2; renderAddEx(); }
+function addExCustomStep(g){ V.addEx.g = g; V.addEx.step = 3; renderAddEx(); setTimeout(() => { const el = $('#ax_name'); if (el) el.focus(); }, 60); }
+
+function addExPick(i){
+  const a = V.addEx;
+  if (!pushExercise(a.p, a.d, a.list[i], a.g)) return;
+  closeModal();
   commit();
+  toast('تمت إضافة التمرين ✅');
+}
+
+function addExCustomSave(){
+  const a = V.addEx;
+  const name = ($('#ax_name').value || '').trim();
+  if (!name) { toast('اكتب اسم التمرين أولاً'); return; }
+  const g = $('#ax_g').value;
+  if (!pushExercise(a.p, a.d, name, g)) return;
+  closeModal();
+  commit();
+  toast('تمت إضافة التمرين ✅');
 }
 
 function changeSetCount(pIdx, dIdx, kIdx, newCount){
@@ -1387,19 +1450,7 @@ function renderProgDetail(){
               </div>`;
             }).join('')}
 
-            <div class="card-soft" style="margin-top:8px">
-              <label class="lbl">إضافة تمرين لليوم</label>
-              <div class="row-wrap">
-                <select id="sx_${pIdx}_${dIdx}" style="flex:2;min-width:140px">
-                  ${groups.map(g => `<optgroup label="${g}">${exPool.filter(x=>x.g===g).map(x=>`<option>${esc(x.n)}</option>`).join('')}</optgroup>`).join('')}
-                </select>
-                <input id="nx_${pIdx}_${dIdx}" placeholder="أو تمرين جديد" style="flex:1.4;min-width:110px">
-                <select id="gx_${pIdx}_${dIdx}" style="flex:1;min-width:85px">
-                  ${groups.map(g=>`<option>${g}</option>`).join('')}
-                </select>
-                <button class="sm" onclick="addExToDay(${pIdx},${dIdx})">+ إضافة</button>
-              </div>
-            </div>
+            <button style="width:100%;margin-top:6px" onclick="openAddEx(${pIdx},${dIdx})">+ إضافة تمرين لليوم</button>
           </div>
         ` : ''}
       </div>`;

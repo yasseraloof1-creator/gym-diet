@@ -953,13 +953,9 @@ function buildProgReport(pIdx, friendMode){
   const p = S.pr[pIdx];
   const elapsed = Math.max(1, daysDiff(todayStr(), p.cr) || 1);
   let sumPct = 0, cnt = 0, vol = 0;
-  let out = `📋 ${p.name}
-` + (friendMode ? '' : `⏱ مدة الجدول: ${elapsed} يوم
-`);
+  let out = `📋 ${p.name}\n` + (friendMode ? '' : `⏱ مدة الجدول: ${elapsed} يوم\n`);
   p.days.forEach(d => {
-    out += `
-▪ ${d.n}
-`;
+    out += `\n▪ ${d.n}\n`;
     (d.items||[]).forEach(x => {
       normalizeExItem(x);
       const q = calcPct(x);
@@ -967,15 +963,12 @@ function buildProgReport(pIdx, friendMode){
       vol += x.sets.reduce((s, st) => s + num(st.r) * num(st.w), 0);
       const setsTxt = friendMode ? formatSetsRepsOnly(x.sets) : formatSetsSummary(x.sets);
       out += ` - ${x.e}${x.ss ? ` [سوبر سيت #${x.ss}]` : ''}: ${setsTxt}` +
-        (friendMode ? '' : ` | التقدم: ${q>=0?'+':''}${q.toFixed(0)}%`) + '
-';
+        (friendMode ? '' : ` | التقدم: ${q>=0?'+':''}${q.toFixed(0)}%`) + '\n';
     });
   });
   if (!friendMode) {
-    out += `
-🏋️ الحجم الإجمالي للجدول: ${Math.round(vol).toLocaleString()} كغ`;
-    if (cnt) out += `
-📈 متوسط التحسن: ${(sumPct / cnt).toFixed(0)}%`;
+    out += `\n🏋️ الحجم الإجمالي للجدول: ${Math.round(vol).toLocaleString()} كغ`;
+    if (cnt) out += `\n📈 متوسط التحسن: ${(sumPct / cnt).toFixed(0)}%`;
   }
   V.report = out;
   render();

@@ -267,7 +267,6 @@ function normalizeExItem(it){
     it.ss = n >= 1 && n <= 4 ? String(n) : (n > 4 ? '4' : '');
   }
 
-  // وقت الراحة الافتراضي: 120 ثانية للتمرين العادي و60 ثانية للسوبر سيت، مع احترام الوقت المخصص إن وُجد
   if (it.t == null || num(it.t) <= 0) {
     it.t = it.ss ? 60 : 120;
   } else {
@@ -320,8 +319,9 @@ function loadState(){
   s.goal = s.goal && typeof s.goal === 'object' ? {k: num(s.goal.k)||2500, p: num(s.goal.p)||150} : {k:2500, p:150};
   s.wg = num(s.wg) || 3;
   s.restCfg = s.restCfg && typeof s.restCfg === 'object'
-    ? { normal: Math.max(10, num(s.restCfg.normal) || 120), ss: Math.max(10, num(s.restCfg.ss) || 60) }
+    ? { normal: Math.max(10, num(s.restCfg.normal) || 120), ss: Math.max(5, num(s.restCfg.ss) || 60) }
     : { normal: 120, ss: 60 };
+  s.notifEnabled = s.notifEnabled !== false;
   s.foods = Array.isArray(s.foods) && s.foods.length ? s.foods : SEED_FOODS.map(x=>({...x, brands:[]}));
   if (s.fv !== 3) {
     SEED_FOODS.forEach(f => {
@@ -368,15 +368,84 @@ function loadState(){
 
 let S = loadState();
 let V = { tab: 'home', pIdx: -1, openDays: {}, cat: 'الكل', q: '', sg: '', mo: '', report: '', backupText: '', logView: '', openLogDays: {}, openEx: {}, addEx: null, showUnitMenu: false };
-let timerState = { rem: 0, total: 120, label: '', iv: null };
+let timerState = { rem: 0, total: 120, label: '', iv: null, endAt: 0, alarmIv: null };
 let toastTimer = null;
+let audioCtx = null;
 
 function toast(msg){
   const el = $('#toast');
+  if (!el) return;
   el.textContent = msg;
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ---- Loud Alarm Sound (Web Audio API) & System Notifications ----
+function playLoudAlarm(){
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    // سلسلة نغمات عالية ومرتفعة مدة 4 ثوانٍ
+    const notes = [880, 1174.66, 880, 1318.51, 987.77, 1318.51, 1046.5, 1567.98];
+    notes.forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime + i * 0.45);
+      gain.gain.setValueAtTime(0.001, audioCtx.currentTime + i * 0.45);
+      gain.gain.exponentialRampToValueAtTime(0.85, audioCtx.currentTime + i * 0.45 + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + i * 0.45 + 0.42);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(audioCtx.currentTime + i * 0.45);
+      osc.stop(audioCtx.currentTime + i * 0.45 + 0.44);
+    });
+  } catch(_) {}
+
+  try {
+    if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 600]);
+  } catch(_) {}
+}
+
+function requestNotificationPermission(){
+  if (!('Notification' in window)) {
+    toast('متصفحك لا يدعم إشعارات النظام');
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    playLoudAlarm();
+    sendSystemAlert('Y.A.S — اختبار التنبيه', 'الإشعارات مفعّلة وجاهزة للتنبيه بصوت عالٍ 💪');
+    return;
+  }
+  Notification.requestPermission().then(perm => {
+    if (perm === 'granted') {
+      playLoudAlarm();
+      sendSystemAlert('Y.A.S — تم تفعيل الإشعارات', 'سيصلك تنبيه عند انتهاء وقت الراحة 💪');
+      toast('تم تفعيل الإشعارات بنجاح ✅');
+    } else {
+      toast('يرجى السماح بالإشعارات من إعدادات المتصفح');
+    }
+    render();
+  });
+}
+
+function sendSystemAlert(title, body){
+  playLoudAlarm();
+  if (!S.notifEnabled) return;
+  try {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, {
+        body,
+        requireInteraction: true,
+        silent: false,
+        tag: 'yas-rest-timer'
+      });
+    }
+  } catch(_) {}
 }
 
 const dayTotals = () => S.day.eat.reduce((a,x)=>({
@@ -486,33 +555,45 @@ function uncompleteAllSupsToday(){
   toast('تم إلغاء إنجاز مكملات اليوم');
 }
 
-// ---- Smart Superset & Normal Rest Timer ----
+// ---- Smart Superset & Normal Rest Timer + Quick Preset Buttons ----
 function defaultNormalRest(){
   return Math.max(10, num(S.restCfg?.normal) || 120);
 }
 function defaultSsRest(){
-  return Math.max(10, num(S.restCfg?.ss) || 60);
+  return Math.max(5, num(S.restCfg?.ss) || 60);
 }
 
 function startTimer(sec, label){
   clearInterval(timerState.iv);
   const s = Math.max(5, num(sec) || defaultNormalRest());
+  const endAt = Date.now() + s * 1000;
   timerState = {
     rem: s,
     total: s,
     label: label || 'راحة بين الجولات',
+    endAt,
+    alarmIv: null,
     iv: setInterval(() => {
-      timerState.rem--;
-      if (timerState.rem <= 0) {
+      const left = Math.max(0, Math.ceil((timerState.endAt - Date.now()) / 1000));
+      timerState.rem = left;
+      if (left <= 0) {
         clearInterval(timerState.iv);
+        timerState.iv = null;
         timerState.rem = 0;
+        const doneLabel = timerState.label || 'وقت الراحة';
         toast('انتهى وقت الراحة! جاهز للجولة التالية 💪');
-        try { if (navigator.vibrate) navigator.vibrate([160, 80, 160]); } catch(e){}
+        sendSystemAlert('انتهى وقت الراحة! 💪', `${doneLabel} — ابدأ الجولة التالية الآن`);
       }
       renderTimer();
-    }, 1000)
+    }, 500)
   };
   renderTimer();
+}
+
+// إعادة ضبط العداد على مدة سريعة جديدة أثناء عمله
+function setActiveTimerPreset(sec){
+  const s = Math.max(5, num(sec));
+  startTimer(s, timerState.label || 'راحة بين الجولات');
 }
 
 function startTimerFor(pIdx, dIdx, kIdx){
@@ -523,34 +604,68 @@ function startTimerFor(pIdx, dIdx, kIdx){
 
 function addTimer(delta){
   if (!timerState.rem && delta < 0) return;
-  timerState.rem = Math.max(0, timerState.rem + delta);
-  if (timerState.rem === 0) { clearInterval(timerState.iv); timerState.iv = null; }
+  const nextRem = Math.max(0, (timerState.rem || 0) + delta);
+  if (nextRem === 0) { stopTimer(); return; }
+  timerState.rem = nextRem;
+  timerState.endAt = Date.now() + nextRem * 1000;
+  if (!timerState.iv) {
+    timerState.iv = setInterval(() => {
+      const left = Math.max(0, Math.ceil((timerState.endAt - Date.now()) / 1000));
+      timerState.rem = left;
+      if (left <= 0) {
+        clearInterval(timerState.iv);
+        timerState.iv = null;
+        timerState.rem = 0;
+        toast('انتهى وقت الراحة! جاهز للجولة التالية 💪');
+        sendSystemAlert('انتهى وقت الراحة! 💪', `${timerState.label || 'وقت الراحة'} — ابدأ الجولة التالية الآن`);
+      }
+      renderTimer();
+    }, 500);
+  }
   renderTimer();
 }
 
 function stopTimer(){
   clearInterval(timerState.iv);
-  timerState = { rem: 0, total: defaultNormalRest(), label: '', iv: null };
+  timerState = { rem: 0, total: defaultNormalRest(), label: '', endAt: 0, iv: null, alarmIv: null };
   renderTimer();
 }
 
 function renderTimer(){
   const box = $('#timerFloat');
+  if (!box) return;
   if (!timerState.rem) { box.innerHTML = ''; return; }
   const m = String(Math.floor(timerState.rem / 60)).padStart(2,'0');
   const sec = String(timerState.rem % 60).padStart(2,'0');
-  box.innerHTML = `<div class="timer-bar">
-    <div><div style="font-size:11px;opacity:.8">${esc(timerState.label)}</div><b>${m}:${sec}</b></div>
-    <div class="row-wrap">
-      <button class="sm x" onclick="addTimer(15)">+15ث</button>
-      <button class="sm x" onclick="addTimer(-15)">-15ث</button>
-      <button class="sm" onclick="stopTimer()">إيقاف</button>
+  box.innerHTML = `<div class="timer-bar" style="flex-direction:column;align-items:stretch;gap:8px">
+    <div class="row" style="width:100%">
+      <div><div style="font-size:11px;opacity:.85">${esc(timerState.label)}</div><b>${m}:${sec}</b></div>
+      <div class="row-wrap">
+        <button class="sm x" onclick="addTimer(15)">+15ث</button>
+        <button class="sm x" onclick="addTimer(-15)">-15ث</button>
+        <button class="sm" onclick="stopTimer()">إيقاف</button>
+      </div>
+    </div>
+    <div class="row-wrap" style="justify-content:space-between">
+      <button class="sm x" style="flex:1" onclick="setActiveTimerPreset(30)">30ث</button>
+      <button class="sm x" style="flex:1" onclick="setActiveTimerPreset(60)">60ث</button>
+      <button class="sm x" style="flex:1" onclick="setActiveTimerPreset(90)">90ث</button>
+      <button class="sm x" style="flex:1" onclick="setActiveTimerPreset(120)">120ث</button>
     </div>
   </div>`;
 }
 
-function openModal(html){ $('#modalSheet').innerHTML = html; $('#modalRoot').classList.add('open'); }
-function closeModal(){ V.showUnitMenu = false; $('#modalRoot').classList.remove('open'); $('#modalSheet').innerHTML = ''; }
+function openModal(html){
+  const sheet = $('#modalSheet');
+  const root = $('#modalRoot');
+  if (sheet && root) { sheet.innerHTML = html; root.classList.add('open'); }
+}
+function closeModal(){
+  V.showUnitMenu = false;
+  const sheet = $('#modalSheet');
+  const root = $('#modalRoot');
+  if (sheet && root) { root.classList.remove('open'); sheet.innerHTML = ''; }
+}
 
 const allExercises = () => {
   const base = Object.entries(DEFAULT_EX).flatMap(([g, arr]) => arr.map(n => ({ n, g })));
@@ -796,6 +911,7 @@ function updateRestTime(pIdx, dIdx, kIdx, val){
   it.t = Math.max(5, num(val) || defaultNormalRest());
   S.last[it.e] = { ...(S.last[it.e]||{}), t: it.t };
   save();
+  render();
 }
 
 function logExerciseToHistory(p, day, it, note){
@@ -827,13 +943,11 @@ function handleSetCompletedTimer(day, kIdx, setIdx){
   const normalSec = defaultNormalRest();
   const ssSec = num(it.t) > 0 ? num(it.t) : defaultSsRest();
 
-  // إذا لم يكن سوبر سيت: راحة الجولة الافتراضية 120 ثانية (أو المحددة للتمرين)
   if (!it.ss) {
     startTimer(num(it.t) || normalSec, `${it.e} — جولة ${setIdx+1} (راحة)`);
     return;
   }
 
-  // ضمن مجموعة السوبر سيت: ابحث عن التمارين الأخرى بنفس المجموعة
   const groupPeers = day.items
     .map((other, idx) => { normalizeExItem(other); return { other, idx }; })
     .filter(o => o.idx !== kIdx && o.other.ss === it.ss);
@@ -841,12 +955,10 @@ function handleSetCompletedTimer(day, kIdx, setIdx){
   const pendingInThisRound = groupPeers.filter(o => o.other.sets[setIdx] && !o.other.sets[setIdx].done);
 
   if (pendingInThisRound.length > 0) {
-    // ما زال هناك تمرين ثانٍ في نفس الجولة: راحة قصيرة (60 ثانية افتراضياً) للانتقال إليه
     const nextPeer = pendingInThisRound[0].other;
     startTimer(ssSec, `سوبر سيت #${it.ss} → ${nextPeer.e} (جولة ${setIdx+1})`);
     toast(`🔗 سوبر سيت #${it.ss}: راحة ${ssSec}ث ثم انتقل إلى ${nextPeer.e}`);
   } else {
-    // اكتملت الجولة لدى التمرين الأول والثاني معاً: راحة كاملة (120 ثانية) قبل بدء الجولة التالية
     const allInGroupDoneRound = groupPeers.every(o => !o.other.sets[setIdx] || o.other.sets[setIdx].done);
     if (allInGroupDoneRound) {
       startTimer(normalSec, `انتهت جولة ${setIdx+1} للسوبر سيت #${it.ss} — راحة الجولة`);
@@ -932,7 +1044,7 @@ function openSupersetModal(pIdx, dIdx, kIdx){
     <h3 style="margin:0 0 6px">🔗 ربط سوبر سيت — ${esc(it.e)}</h3>
     <p class="muted" style="margin:0 0 10px">اختر مجموعة السوبر سيت وحدد وقت الراحة بين تمرين وتمرين في السوبر سيت (الافتراضي 60 ثانية، وبين الجولات 120 ثانية):</p>
 
-    <div class="grid2" style="margin-bottom:10px">
+    <div class="grid2" style="margin-bottom:8px">
       <div>
         <label class="lbl">راحة بين التمرينين بالسوبر سيت (ثانية)</label>
         <input id="ss_between_sec" type="number" min="5" step="5" value="${curSsRest}">
@@ -941,6 +1053,13 @@ function openSupersetModal(pIdx, dIdx, kIdx){
         <label class="lbl">راحة بين الجولات الافتراضية (ثانية)</label>
         <input id="ss_round_sec" type="number" min="10" step="5" value="${curNormRest}">
       </div>
+    </div>
+
+    <div class="row-wrap" style="margin-bottom:10px">
+      <button type="button" class="sm x" onclick="$('#ss_between_sec').value=30">تبديل 30ث</button>
+      <button type="button" class="sm x" onclick="$('#ss_between_sec').value=60">تبديل 60ث</button>
+      <button type="button" class="sm x" onclick="$('#ss_round_sec').value=90">جولة 90ث</button>
+      <button type="button" class="sm x" onclick="$('#ss_round_sec').value=120">جولة 120ث</button>
     </div>
 
     <div class="grid2" style="margin-bottom:12px">
@@ -1036,13 +1155,9 @@ function buildProgReport(pIdx, friendMode){
   const p = S.pr[pIdx];
   const elapsed = Math.max(1, daysDiff(todayStr(), p.cr) || 1);
   let sumPct = 0, cnt = 0, vol = 0;
-  let out = `📋 ${p.name}
-` + (friendMode ? '' : `⏱ مدة الجدول: ${elapsed} يوم
-`);
+  let out = `📋 ${p.name}\n` + (friendMode ? '' : `⏱ مدة الجدول: ${elapsed} يوم\n`);
   p.days.forEach(d => {
-    out += `
-▪ ${d.n}
-`;
+    out += `\n▪ ${d.n}\n`;
     (d.items||[]).forEach(x => {
       normalizeExItem(x);
       const q = calcPct(x);
@@ -1050,15 +1165,12 @@ function buildProgReport(pIdx, friendMode){
       vol += x.sets.reduce((s, st) => s + num(st.r) * num(st.w), 0);
       const setsTxt = friendMode ? formatSetsRepsOnly(x.sets) : formatSetsSummary(x.sets);
       out += ` - ${x.e}${x.ss ? ` [سوبر سيت #${x.ss}]` : ''}: ${setsTxt}` +
-        (friendMode ? '' : ` | التقدم: ${q>=0?'+':''}${q.toFixed(0)}%`) + '
-';
+        (friendMode ? '' : ` | التقدم: ${q>=0?'+':''}${q.toFixed(0)}%`) + '\n';
     });
   });
   if (!friendMode) {
-    out += `
-🏋️ الحجم الإجمالي للجدول: ${Math.round(vol).toLocaleString()} كغ`;
-    if (cnt) out += `
-📈 متوسط التحسن: ${(sumPct / cnt).toFixed(0)}%`;
+    out += `\n🏋️ الحجم الإجمالي للجدول: ${Math.round(vol).toLocaleString()} كغ`;
+    if (cnt) out += `\n📈 متوسط التحسن: ${(sumPct / cnt).toFixed(0)}%`;
   }
   V.report = out;
   render();
@@ -1071,7 +1183,6 @@ async function copyOrShareReport(){
   if (ta) { ta.select(); document.execCommand('copy'); toast('تم النسخ'); }
 }
 
-// ---- Food, Sub-Brands, Unit Picker & Smart Quantity/Weight ----
 function parseUnitGrams(u){
   const s = String(u || '').trim();
   const m = s.match(/(\d+(?:\.\d+)?)\s*(غ|غرام|جرام|g|مل|ml)/i);
@@ -1402,7 +1513,6 @@ function smartSuggest(){
   render();
 }
 
-// ---- Supplement Sheet ----
 function openSupSheet(){
   const td = todayStr();
   openModal(`
@@ -1468,7 +1578,6 @@ function saveNewSup(){
   toast('تمت إضافة المكمل ✅');
 }
 
-// ---- Body Metrics Sheet ----
 function openBodySheet(){
   const last = S.body[S.body.length - 1] || {};
   openModal(`
@@ -1502,7 +1611,6 @@ function saveBodyEntry(){
   toast('تم تسجيل قياس الجسم ✅');
 }
 
-// ---- Backup ----
 function exportJson(){ V.backupText = JSON.stringify(S, null, 2); render(); }
 function downloadJson(){
   const txt = V.backupText || JSON.stringify(S, null, 2);
@@ -1529,7 +1637,6 @@ function importJsonText(raw){
   } catch(e){ toast('صيغة النسخة غير صحيحة'); }
 }
 
-// ---- Views ----
 function renderHome(){
   const t = dayTotals();
   const g = S.goal;
@@ -1579,7 +1686,21 @@ function renderHome(){
     return `<div class="wday ${off===0?'today':''}">${dn}<b>${+d.slice(8)}</b>${hasW?'<div class="dot"></div>':''}</div>`;
   }).join('');
 
+  const permState = ('Notification' in window) ? Notification.permission : 'unsupported';
+
   return `
+    <div class="card">
+      <div class="row" style="margin-bottom:8px">
+        <b>🔔 تنبيهات الصوت والمؤقت</b>
+        <button class="sm ${permState==='granted'?'ok':''}" onclick="requestNotificationPermission()">
+          ${permState==='granted' ? '🔊 مفعّل (اختبار صوت)' : '🔔 تفعيل الإشعارات'}
+        </button>
+      </div>
+      <div class="muted">
+        راحة الجولة الافتراضية: <b>${defaultNormalRest()}ث</b> · راحة السوبر سيت: <b>${defaultSsRest()}ث</b>
+      </div>
+    </div>
+
     <div class="card">
       <div class="row" style="margin-bottom:8px">
         <b>🍽️ ملخص التغذية اليوم</b>
@@ -1774,6 +1895,13 @@ function renderProgDetail(){
                     <label class="lbl">${it.ss ? 'راحة التبديل بالسوبر سيت (ث)' : 'راحة بين الجولات (ث)'}</label>
                     <input type="number" step="5" min="5" value="${it.t}" onchange="updateRestTime(${pIdx},${dIdx},${kIdx},this.value)">
                   </div>
+                </div>
+
+                <div class="row-wrap" style="margin-top:6px">
+                  <button type="button" class="sm x" onclick="updateRestTime(${pIdx},${dIdx},${kIdx},30)">30ث</button>
+                  <button type="button" class="sm x" onclick="updateRestTime(${pIdx},${dIdx},${kIdx},60)">60ث</button>
+                  <button type="button" class="sm x" onclick="updateRestTime(${pIdx},${dIdx},${kIdx},90)">90ث</button>
+                  <button type="button" class="sm x" onclick="updateRestTime(${pIdx},${dIdx},${kIdx},120)">120ث</button>
                 </div>
 
                 <div class="set-table">
@@ -2140,13 +2268,16 @@ function render(){
     sup: renderSup,
     log: renderLog
   };
-  $('#app').innerHTML = `
-    <div class="topbar">
-      <h1 class="brand">Y.A.S</h1>
-      <span class="sub-badge">${todayStr()}</span>
-    </div>
-    ${(views[V.tab] || renderHome)()}
-  `;
+  const appEl = $('#app');
+  if (appEl) {
+    appEl.innerHTML = `
+      <div class="topbar">
+        <h1 class="brand">Y.A.S</h1>
+        <span class="sub-badge">${todayStr()}</span>
+      </div>
+      ${(views[V.tab] || renderHome)()}
+    `;
+  }
 
   const navItems = [
     ['home','🏠','الرئيسية'],
@@ -2155,12 +2286,15 @@ function render(){
     ['sup','💊','المكملات'],
     ['log','📈','السجل']
   ];
-  $('#nv').innerHTML = navItems.map(([k, ic, lbl]) => `
-    <button class="${V.tab===k?'on':''}" onclick="setTab('${k}')">
-      <span style="font-size:17px">${ic}</span>
-      <span>${lbl}</span>
-    </button>
-  `).join('');
+  const nvEl = $('#nv');
+  if (nvEl) {
+    nvEl.innerHTML = navItems.map(([k, ic, lbl]) => `
+      <button class="${V.tab===k?'on':''}" onclick="setTab('${k}')">
+        <span style="font-size:17px">${ic}</span>
+        <span>${lbl}</span>
+      </button>
+    `).join('');
+  }
   renderTimer();
 }
 

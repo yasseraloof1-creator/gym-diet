@@ -267,6 +267,13 @@ function normalizeExItem(it){
     it.ss = n >= 1 && n <= 4 ? String(n) : (n > 4 ? '4' : '');
   }
 
+  // وقت الراحة الافتراضي: 120 ثانية للتمرين العادي و60 ثانية للسوبر سيت، مع احترام الوقت المخصص إن وُجد
+  if (it.t == null || num(it.t) <= 0) {
+    it.t = it.ss ? 60 : 120;
+  } else {
+    it.t = Math.max(5, num(it.t));
+  }
+
   if (it.baseW == null) {
     if (num(it.sw) > 0) it.baseW = num(it.sw);
     else if (num(it.baseVol) > 0) {
@@ -312,6 +319,9 @@ function loadState(){
   s.body = Array.isArray(s.body) ? s.body : [];
   s.goal = s.goal && typeof s.goal === 'object' ? {k: num(s.goal.k)||2500, p: num(s.goal.p)||150} : {k:2500, p:150};
   s.wg = num(s.wg) || 3;
+  s.restCfg = s.restCfg && typeof s.restCfg === 'object'
+    ? { normal: Math.max(10, num(s.restCfg.normal) || 120), ss: Math.max(10, num(s.restCfg.ss) || 60) }
+    : { normal: 120, ss: 60 };
   s.foods = Array.isArray(s.foods) && s.foods.length ? s.foods : SEED_FOODS.map(x=>({...x, brands:[]}));
   if (s.fv !== 3) {
     SEED_FOODS.forEach(f => {
@@ -358,7 +368,7 @@ function loadState(){
 
 let S = loadState();
 let V = { tab: 'home', pIdx: -1, openDays: {}, cat: 'الكل', q: '', sg: '', mo: '', report: '', backupText: '', logView: '', openLogDays: {}, openEx: {}, addEx: null, showUnitMenu: false };
-let timerState = { rem: 0, total: 60, label: '', iv: null };
+let timerState = { rem: 0, total: 120, label: '', iv: null };
 let toastTimer = null;
 
 function toast(msg){
@@ -366,7 +376,7 @@ function toast(msg){
   el.textContent = msg;
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
 }
 
 const dayTotals = () => S.day.eat.reduce((a,x)=>({
@@ -476,9 +486,17 @@ function uncompleteAllSupsToday(){
   toast('تم إلغاء إنجاز مكملات اليوم');
 }
 
+// ---- Smart Superset & Normal Rest Timer ----
+function defaultNormalRest(){
+  return Math.max(10, num(S.restCfg?.normal) || 120);
+}
+function defaultSsRest(){
+  return Math.max(10, num(S.restCfg?.ss) || 60);
+}
+
 function startTimer(sec, label){
   clearInterval(timerState.iv);
-  const s = Math.max(10, num(sec) || 60);
+  const s = Math.max(5, num(sec) || defaultNormalRest());
   timerState = {
     rem: s,
     total: s,
@@ -499,7 +517,8 @@ function startTimer(sec, label){
 
 function startTimerFor(pIdx, dIdx, kIdx){
   const it = S.pr[pIdx].days[dIdx].items[kIdx];
-  startTimer(it.t || 60, it.e);
+  normalizeExItem(it);
+  startTimer(it.t || (it.ss ? defaultSsRest() : defaultNormalRest()), it.e);
 }
 
 function addTimer(delta){
@@ -511,7 +530,7 @@ function addTimer(delta){
 
 function stopTimer(){
   clearInterval(timerState.iv);
-  timerState = { rem: 0, total: 60, label: '', iv: null };
+  timerState = { rem: 0, total: defaultNormalRest(), label: '', iv: null };
   renderTimer();
 }
 
@@ -650,12 +669,13 @@ function pushExercise(pIdx, dIdx, name, g){
     ? prev.sets.map(st => ({ r: num(st.r)||10, w: num(st.w)||0, done: false }))
     : makeSets(num(prev.s)||3, num(prev.r)||10, num(prev.w)||0);
   const items = S.pr[pIdx].days[dIdx].items;
+  const defRest = defaultNormalRest();
   items.push({
     e: name, g,
     s: initSets.length,
     r: initSets[0].r,
     w: initSets[0].w,
-    t: num(prev.t) || 60,
+    t: num(prev.t) || defRest,
     sets: initSets,
     baseW: avgW(initSets),
     ss: '', done: '', n: ''
@@ -773,7 +793,7 @@ function updateSingleSet(pIdx, dIdx, kIdx, setIdx, field, val){
 
 function updateRestTime(pIdx, dIdx, kIdx, val){
   const it = S.pr[pIdx].days[dIdx].items[kIdx];
-  it.t = Math.max(5, num(val) || 60);
+  it.t = Math.max(5, num(val) || defaultNormalRest());
   S.last[it.e] = { ...(S.last[it.e]||{}), t: it.t };
   save();
 }
@@ -801,6 +821,42 @@ function removeExerciseFromHistory(p, day, it){
   S.lw = S.lw.filter(row => !(row.d === td && row.p === p.name && row.y === day.n && row.e === it.e));
 }
 
+function handleSetCompletedTimer(day, kIdx, setIdx){
+  const it = day.items[kIdx];
+  normalizeExItem(it);
+  const normalSec = defaultNormalRest();
+  const ssSec = num(it.t) > 0 ? num(it.t) : defaultSsRest();
+
+  // إذا لم يكن سوبر سيت: راحة الجولة الافتراضية 120 ثانية (أو المحددة للتمرين)
+  if (!it.ss) {
+    startTimer(num(it.t) || normalSec, `${it.e} — جولة ${setIdx+1} (راحة)`);
+    return;
+  }
+
+  // ضمن مجموعة السوبر سيت: ابحث عن التمارين الأخرى بنفس المجموعة
+  const groupPeers = day.items
+    .map((other, idx) => { normalizeExItem(other); return { other, idx }; })
+    .filter(o => o.idx !== kIdx && o.other.ss === it.ss);
+
+  const pendingInThisRound = groupPeers.filter(o => o.other.sets[setIdx] && !o.other.sets[setIdx].done);
+
+  if (pendingInThisRound.length > 0) {
+    // ما زال هناك تمرين ثانٍ في نفس الجولة: راحة قصيرة (60 ثانية افتراضياً) للانتقال إليه
+    const nextPeer = pendingInThisRound[0].other;
+    startTimer(ssSec, `سوبر سيت #${it.ss} → ${nextPeer.e} (جولة ${setIdx+1})`);
+    toast(`🔗 سوبر سيت #${it.ss}: راحة ${ssSec}ث ثم انتقل إلى ${nextPeer.e}`);
+  } else {
+    // اكتملت الجولة لدى التمرين الأول والثاني معاً: راحة كاملة (120 ثانية) قبل بدء الجولة التالية
+    const allInGroupDoneRound = groupPeers.every(o => !o.other.sets[setIdx] || o.other.sets[setIdx].done);
+    if (allInGroupDoneRound) {
+      startTimer(normalSec, `انتهت جولة ${setIdx+1} للسوبر سيت #${it.ss} — راحة الجولة`);
+      toast(`✅ اكتملت جولة ${setIdx+1} للسوبر سيت! راحة ${normalSec}ث قبل الجولة التالية`);
+    } else {
+      startTimer(ssSec, `${it.e} — جولة ${setIdx+1}`);
+    }
+  }
+}
+
 function toggleSetDone(pIdx, dIdx, kIdx, setIdx){
   const p = S.pr[pIdx];
   const day = p.days[dIdx];
@@ -819,18 +875,7 @@ function toggleSetDone(pIdx, dIdx, kIdx, setIdx){
     return;
   }
 
-  if (num(it.t) > 0) {
-    const partner = it.ss ? day.items.find((other, idx) => {
-      if (idx === kIdx || other.ss !== it.ss) return false;
-      normalizeExItem(other);
-      return other.sets[setIdx] && !other.sets[setIdx].done;
-    }) : null;
-    if (partner) {
-      toast(`🔗 سوبر سيت #${it.ss}: انتقل الآن إلى ${partner.e}`);
-    } else {
-      startTimer(it.t, `${it.e} — جولة ${setIdx+1}`);
-    }
-  }
+  handleSetCompletedTimer(day, kIdx, setIdx);
 
   if (it.sets.every(st => st.done)) {
     it.done = todayStr();
@@ -880,10 +925,23 @@ function openSupersetModal(pIdx, dIdx, kIdx){
   const it = day.items[kIdx];
   normalizeExItem(it);
   const others = day.items.map((x, idx) => ({ x, idx })).filter(o => o.idx !== kIdx);
+  const curSsRest = num(it.t) > 0 && it.ss ? num(it.t) : defaultSsRest();
+  const curNormRest = defaultNormalRest();
 
   openModal(`
     <h3 style="margin:0 0 6px">🔗 ربط سوبر سيت — ${esc(it.e)}</h3>
-    <p class="muted" style="margin:0 0 12px">اختر مجموعة السوبر سيت (مثلاً #1 أو #2) لربط التمارين التي تُلعب معاً بالتناوب في نفس اليوم:</p>
+    <p class="muted" style="margin:0 0 10px">اختر مجموعة السوبر سيت وحدد وقت الراحة بين تمرين وتمرين في السوبر سيت (الافتراضي 60 ثانية، وبين الجولات 120 ثانية):</p>
+
+    <div class="grid2" style="margin-bottom:10px">
+      <div>
+        <label class="lbl">راحة بين التمرينين بالسوبر سيت (ثانية)</label>
+        <input id="ss_between_sec" type="number" min="5" step="5" value="${curSsRest}">
+      </div>
+      <div>
+        <label class="lbl">راحة بين الجولات الافتراضية (ثانية)</label>
+        <input id="ss_round_sec" type="number" min="10" step="5" value="${curNormRest}">
+      </div>
+    </div>
 
     <div class="grid2" style="margin-bottom:12px">
       <button class="${it.ss==='1'?'':'x'}" onclick="setSupersetGroup(${pIdx},${dIdx},${kIdx},'1')">🔗 سوبر سيت #1</button>
@@ -915,11 +973,28 @@ function openSupersetModal(pIdx, dIdx, kIdx){
   `);
 }
 
+function applyRestInputsFromSupersetModal(pIdx, dIdx, kIdx, grp){
+  const it = S.pr[pIdx].days[dIdx].items[kIdx];
+  const betweenVal = num($('#ss_between_sec')?.value);
+  const roundVal = num($('#ss_round_sec')?.value);
+  if (roundVal >= 10) {
+    S.restCfg.normal = roundVal;
+  }
+  if (grp) {
+    const ssSec = betweenVal >= 5 ? betweenVal : defaultSsRest();
+    S.restCfg.ss = ssSec;
+    it.t = ssSec;
+  } else {
+    it.t = roundVal >= 10 ? roundVal : defaultNormalRest();
+  }
+}
+
 function setSupersetGroup(pIdx, dIdx, kIdx, grp){
+  applyRestInputsFromSupersetModal(pIdx, dIdx, kIdx, grp);
   S.pr[pIdx].days[dIdx].items[kIdx].ss = grp;
   closeModal();
   commit();
-  toast(grp ? `تم تعيين سوبر سيت #${grp} 🔗` : 'تم فك ارتباط السوبر سيت');
+  toast(grp ? `تم تعيين سوبر سيت #${grp} (راحة التبديل ${S.pr[pIdx].days[dIdx].items[kIdx].t}ث) 🔗` : 'تم فك ارتباط السوبر سيت');
 }
 
 function pairExercises(pIdx, dIdx, k1, k2){
@@ -930,11 +1005,19 @@ function pairExercises(pIdx, dIdx, k1, k2){
     const used = new Set(items.map(x => x.ss).filter(Boolean));
     grp = ['1','2','3','4'].find(g => !used.has(g)) || '1';
   }
+  const betweenVal = num($('#ss_between_sec')?.value);
+  const roundVal = num($('#ss_round_sec')?.value);
+  if (roundVal >= 10) S.restCfg.normal = roundVal;
+  const ssSec = betweenVal >= 5 ? betweenVal : defaultSsRest();
+  S.restCfg.ss = ssSec;
+
   ex1.ss = grp;
   ex2.ss = grp;
+  ex1.t = ssSec;
+  ex2.t = ssSec;
   closeModal();
   commit();
-  toast(`تم ربط «${ex1.e}» مع «${ex2.e}» في سوبر سيت #${grp} 🔗`);
+  toast(`تم ربط «${ex1.e}» مع «${ex2.e}» (راحة التبديل ${ssSec}ث) 🔗`);
 }
 
 function editMachineNote(pIdx, dIdx, kIdx){
@@ -953,9 +1036,13 @@ function buildProgReport(pIdx, friendMode){
   const p = S.pr[pIdx];
   const elapsed = Math.max(1, daysDiff(todayStr(), p.cr) || 1);
   let sumPct = 0, cnt = 0, vol = 0;
-  let out = `📋 ${p.name}\n` + (friendMode ? '' : `⏱ مدة الجدول: ${elapsed} يوم\n`);
+  let out = `📋 ${p.name}
+` + (friendMode ? '' : `⏱ مدة الجدول: ${elapsed} يوم
+`);
   p.days.forEach(d => {
-    out += `\n▪ ${d.n}\n`;
+    out += `
+▪ ${d.n}
+`;
     (d.items||[]).forEach(x => {
       normalizeExItem(x);
       const q = calcPct(x);
@@ -963,12 +1050,15 @@ function buildProgReport(pIdx, friendMode){
       vol += x.sets.reduce((s, st) => s + num(st.r) * num(st.w), 0);
       const setsTxt = friendMode ? formatSetsRepsOnly(x.sets) : formatSetsSummary(x.sets);
       out += ` - ${x.e}${x.ss ? ` [سوبر سيت #${x.ss}]` : ''}: ${setsTxt}` +
-        (friendMode ? '' : ` | التقدم: ${q>=0?'+':''}${q.toFixed(0)}%`) + '\n';
+        (friendMode ? '' : ` | التقدم: ${q>=0?'+':''}${q.toFixed(0)}%`) + '
+';
     });
   });
   if (!friendMode) {
-    out += `\n🏋️ الحجم الإجمالي للجدول: ${Math.round(vol).toLocaleString()} كغ`;
-    if (cnt) out += `\n📈 متوسط التحسن: ${(sumPct / cnt).toFixed(0)}%`;
+    out += `
+🏋️ الحجم الإجمالي للجدول: ${Math.round(vol).toLocaleString()} كغ`;
+    if (cnt) out += `
+📈 متوسط التحسن: ${(sumPct / cnt).toFixed(0)}%`;
   }
   V.report = out;
   render();
@@ -1681,7 +1771,7 @@ function renderProgDetail(){
                     <input type="number" min="1" max="12" value="${it.sets.length}" onchange="changeSetCount(${pIdx},${dIdx},${kIdx},this.value)">
                   </div>
                   <div>
-                    <label class="lbl">وقت الراحة (ثانية)</label>
+                    <label class="lbl">${it.ss ? 'راحة التبديل بالسوبر سيت (ث)' : 'راحة بين الجولات (ث)'}</label>
                     <input type="number" step="5" min="5" value="${it.t}" onchange="updateRestTime(${pIdx},${dIdx},${kIdx},this.value)">
                   </div>
                 </div>
@@ -1703,7 +1793,7 @@ function renderProgDetail(){
                 </div>
 
                 <div class="muted" style="margin-bottom:8px">
-                  <span style="cursor:pointer;color:var(--o)" onclick="startTimerFor(${pIdx},${dIdx},${kIdx})">⏱ مؤقت راحة ${it.t||60}ث</span>
+                  <span style="cursor:pointer;color:var(--o)" onclick="startTimerFor(${pIdx},${dIdx},${kIdx})">⏱ مؤقت ${it.t||(it.ss?defaultSsRest():defaultNormalRest())}ث${it.ss ? ' · راحة الجولة ' + defaultNormalRest() + 'ث' : ''}</span>
                   ${mNote ? ` · 🛠 ${esc(mNote)}` : ''}
                   ${it.n ? ` · 📝 ${esc(it.n)}` : ''}
                 </div>

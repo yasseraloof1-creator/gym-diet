@@ -82,6 +82,10 @@ label.lbl{display:block;font-size:11px;color:var(--m);margin-bottom:3px;font-wei
 .chip{flex:0 0 auto;background:var(--c);color:var(--t);border:1px solid var(--bd);border-radius:99px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer}
 .chip.on{background:var(--o);color:#fff;border-color:var(--o)}
 
+.unit-pop{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;background:var(--c2);border:1px solid var(--bd);border-radius:12px;padding:7px}
+.unit-btn{background:var(--c);color:var(--t);border:1px solid var(--bd);border-radius:8px;padding:4px 9px;font-size:11.5px;font-weight:600}
+.unit-btn.active{background:var(--o);color:#fff;border-color:var(--o)}
+
 .day-acc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;user-select:none}
 .day-acc-head .chev{font-size:13px;color:var(--m);transition:transform .2s ease;display:inline-block}
 .day-acc-head.open .chev{transform:rotate(180deg)}
@@ -140,6 +144,27 @@ const todayStr = (offsetDays = 0) => {
 };
 const daysDiff = (a, b) => Math.round((new Date(a + 'T00:00:00') - new Date(b + 'T00:00:00')) / 864e5);
 
+// تنظيف أو تحديد الصفر تلقائياً في كل حقول الأرقام
+document.addEventListener('focusin', e => {
+  const el = e.target;
+  if (el && el.tagName === 'INPUT' && el.type === 'number') {
+    if (el.value === '0' || num(el.value) === 0) {
+      el.value = '';
+    } else {
+      requestAnimationFrame(() => { try { el.select(); } catch(_) {} });
+    }
+  }
+});
+
+document.addEventListener('click', e => {
+  const el = e.target;
+  if (el && el.tagName === 'INPUT' && el.type === 'number') {
+    if (el.value === '0' || num(el.value) === 0) {
+      el.value = '';
+    }
+  }
+});
+
 const MUSCLE_COLORS = {
   'صدر': '#ef4444',
   'ظهر': '#3b82f6',
@@ -162,9 +187,9 @@ const DEFAULT_EX = {
   'سواعد': ['ويرست كيرل', 'ريفرس ويرست كيرل', 'ريفرس كيرل بار', 'فارمر ووك', 'تعليق على البار']
 };
 
-const FOOD_CATS = ['فواكه','خضار','تمر','حليب','لحوم','حلويات','مخبوزات','مطبوخ'];
+const FOOD_CATS = ['فواكه','خضار','تمر ومكسرات','حليب','لحوم','حلويات','مخبوزات','مطبوخ'];
+const BASE_UNITS = ['حبة','100غ','غرام','مل','مربع','سكوب','ملعقة','كوب'];
 
-// فترات المكملات الجاهزة (بالأيام)
 const FREQS = [
   ['كل يوم',1],['يوم إي يوم لا (كل يومين)',2],['كل 3 أيام',3],['كل أسبوع',7],['كل أسبوعين',14],
   ['كل شهر',30],['كل شهرين',60],['كل 3 أشهر',90],['كل 6 أشهر',180],['كل سنة',365]
@@ -179,8 +204,9 @@ const SEED_FOODS = [
   ['خضار','خس','100غ',15,1.4,0.2,3],['خضار','بروكلي','100غ',34,2.8,0.4,7],['خضار','بطاطا مسلوقة','100غ',87,1.9,0.1,20],
   ['خضار','بطاطا حلوة','100غ',86,1.6,0.1,20],['خضار','سبانخ','100غ',23,2.9,0.4,4],['خضار','فلفل رومي','حبة',30,1,0.3,7],
   ['خضار','كوسا','100غ',17,1.2,0.3,3],['خضار','ذرة','كوب',130,5,2,29],
-  ['تمر','تمرة','حبة',70,0.6,0,18],['تمر','تمر عجوة','تمرة',60,0.5,0,16],['تمر','تمر مجدول','تمرة',66,0.4,0,18],
-  ['تمر','تمر','100غ',280,2.5,0.4,75],['تمر','معمول تمر','قطعة',120,1.5,4,20],
+  ['تمر ومكسرات','تمرة','حبة',70,0.6,0,18],['تمر ومكسرات','تمر عجوة','حبة',60,0.5,0,16],['تمر ومكسرات','تمر مجدول','حبة',66,0.4,0,18],
+  ['تمر ومكسرات','تمر','100غ',280,2.5,0.4,75],['تمر ومكسرات','معمول تمر','حبة',120,1.5,4,20],
+  ['تمر ومكسرات','جوز','100غ',654,15.2,65.2,13.7],['تمر ومكسرات','لوز','100غ',579,21.2,49.9,21.6],
   ['حليب','حليب كامل','كوب',150,8,8,12],['حليب','حليب قليل الدسم','كوب',100,8,2.5,12],['حليب','لبن','كوب',100,6,3,8],
   ['حليب','زبادي','علبة',100,10,2,6],['حليب','زبادي يوناني','علبة',130,17,1,8],['حليب','لبنة','ملعقة',35,1.5,3,1],
   ['حليب','جبنة بيضاء','100غ',264,14,21,4],['حليب','جبنة شيدر','شريحة',70,4,6,0.5],['حليب','جبنة قريش','100غ',98,11,4,3],
@@ -189,20 +215,20 @@ const SEED_FOODS = [
   ['لحوم','لحم غنم','100غ',294,25,21,0],['لحوم','كبدة','100غ',135,20,4,4],['لحوم','سمك','100غ',130,22,4,0],
   ['لحوم','سلمون','100غ',208,20,13,0],['لحوم','روبيان','100غ',99,24,0.3,0.2],['لحوم','بيضة','حبة',78,6,5,0.6],
   ['لحوم','بياض بيضة','حبة',17,3.6,0,0.2],['لحوم','ديك رومي','100غ',135,30,1,0],['لحوم','تونة','علبة',120,26,1,0],
-  ['لحوم','برجر لحم','قطعة',250,17,17,9],
-  ['حلويات','شوكولاتة','مربع',55,0.7,3.5,6],['حلويات','كنافة','قطعة',300,6,15,35],['حلويات','كوكيز','حبة',150,2,7,20],
-  ['حلويات','بقلاوة','قطعة',200,3,11,23],['حلويات','آيس كريم','كرة',140,2.5,7,17],['حلويات','معمول','قطعة',130,1.5,6,18],
-  ['حلويات','دونات','حبة',250,3,14,30],['حلويات','كيكة','قطعة',300,4,15,38],['حلويات','عسل','ملعقة',64,0,0,17],
-  ['حلويات','سكر','ملعقة صغيرة',16,0,0,4],['حلويات','قطايف','قطعة',180,3,8,25],
-  ['مخبوزات','خبز','رغيف',170,6,1,33],['مخبوزات','توست','شريحة',80,3,1,15],['مخبوزات','خبز أسمر','شريحة',70,3,1,12],
-  ['مخبوزات','كرواسون','حبة',230,5,12,26],['مخبوزات','صامولي','حبة',150,5,2,28],['مخبوزات','مناقيش زعتر','قطعة',300,8,12,40],
-  ['مخبوزات','فطيرة جبنة','قطعة',250,8,13,25],['مخبوزات','شوفان','40غ',150,5,3,27],['مخبوزات','كورن فليكس','كوب',100,2,0,24],
-  ['مطبوخ','رز','كوب',205,4,0.4,45],['مطبوخ','مكرونة','كوب',220,8,1,43],['مطبوخ','فول','طبق',250,14,5,35],
-  ['مطبوخ','حمص','طبق',300,10,15,30],['مطبوخ','عدس مطبوخ','طبق',230,18,1,40],['مطبوخ','مندي دجاج','طبق',700,40,25,75],
-  ['مطبوخ','كبسة','طبق',650,35,22,75],['مطبوخ','شاورما','ساندويتش',550,28,28,45],['مطبوخ','فلافل','حبة',57,2.3,3,5],
-  ['مطبوخ','مقلوبة','طبق',600,30,22,70],['مطبوخ','بطاطس مقلية','100غ',312,3.4,15,41],['مطبوخ','بيتزا','شريحة',285,12,10,36],
-  ['مطبوخ','فتة','طبق',500,20,20,55]
-].map(([g,n,u,k,p,f,h]) => ({g,n,u,k,p,f,h,v:false}));
+  ['لحوم','برجر لحم','حبة',250,17,17,9],
+  ['حلويات','شوكولاتة','100غ',540,6,32,58],['حلويات','كنافة','حبة',300,6,15,35],['حلويات','كوكيز','حبة',150,2,7,20],
+  ['حلويات','بقلاوة','حبة',200,3,11,23],['حلويات','آيس كريم','سكوب',140,2.5,7,17],['حلويات','معمول','حبة',130,1.5,6,18],
+  ['حلويات','دونات','حبة',250,3,14,30],['حلويات','كيكة','حبة',300,4,15,38],['حلويات','عسل','ملعقة',64,0,0,17],
+  ['حلويات','سكر','ملعقة',16,0,0,4],['حلويات','قطايف','حبة',180,3,8,25],
+  ['مخبوزات','خبز','حبة',170,6,1,33],['مخبوزات','توست','حبة',80,3,1,15],['مخبوزات','خبز أسمر','حبة',70,3,1,12],
+  ['مخبوزات','كرواسون','حبة',230,5,12,26],['مخبوزات','صامولي','حبة',150,5,2,28],['مخبوزات','مناقيش زعتر','حبة',300,8,12,40],
+  ['مخبوزات','فطيرة جبنة','حبة',250,8,13,25],['مخبوزات','شوفان','100غ',375,12.5,7.5,67.5],['مخبوزات','كورن فليكس','كوب',100,2,0,24],
+  ['مطبوخ','رز','كوب',205,4,0.4,45],['مطبوخ','مكرونة','كوب',220,8,1,43],['مطبوخ','فول','كوب',250,14,5,35],
+  ['مطبوخ','حمص','كوب',300,10,15,30],['مطبوخ','عدس مطبوخ','كوب',230,18,1,40],['مطبوخ','مندي دجاج','حبة',700,40,25,75],
+  ['مطبوخ','كبسة','كوب',650,35,22,75],['مطبوخ','شاورما','حبة',550,28,28,45],['مطبوخ','فلافل','حبة',57,2.3,3,5],
+  ['مطبوخ','مقلوبة','كوب',600,30,22,70],['مطبوخ','بطاطس مقلية','100غ',312,3.4,15,41],['مطبوخ','بيتزا','حبة',285,12,10,36],
+  ['مطبوخ','فتة','كوب',500,20,20,55]
+].map(([g,n,u,k,p,f,h]) => ({g,n,u,k,p,f,h,v:false,brands:[]}));
 
 function makeSets(count, reps, weight, oldDoneArr){
   const n = Math.max(1, Math.min(12, Math.round(num(count) || 3)));
@@ -215,7 +241,6 @@ function makeSets(count, reps, weight, oldDoneArr){
   }));
 }
 
-// متوسط الوزن عبر الجولات — أساس نسبة التقدم (الوزن فقط، بدون العدات)
 function avgW(sets){
   if (!sets || !sets.length) return 0;
   return sets.reduce((a, s) => a + num(s.w), 0) / sets.length;
@@ -225,7 +250,6 @@ function normalizeExItem(it){
   const count = Math.max(1, Math.min(12, Math.round(num(it.s) || (Array.isArray(it.sets) ? it.sets.length : 3))));
   if (!Array.isArray(it.sets) || !it.sets.length) {
     it.sets = makeSets(count, it.r, it.w, it.setDone);
-    // ترحيل عدات الجولات من النسخة القديمة (rs)
     if (Array.isArray(it.rs)) it.sets.forEach((st, i) => { if (it.rs[i] != null) st.r = num(it.rs[i]); });
   } else {
     it.sets = it.sets.map(st => ({
@@ -236,7 +260,6 @@ function normalizeExItem(it){
   }
   it.s = it.sets.length;
 
-  // مجموعة السوبر سيت: '' | '1'..'4'
   if (it.ss === true) it.ss = '1';
   else if (!it.ss || it.ss === '0') it.ss = '';
   else {
@@ -244,7 +267,6 @@ function normalizeExItem(it){
     it.ss = n >= 1 && n <= 4 ? String(n) : (n > 4 ? '4' : '');
   }
 
-  // وزن البداية لحساب التقدم
   if (it.baseW == null) {
     if (num(it.sw) > 0) it.baseW = num(it.sw);
     else if (num(it.baseVol) > 0) {
@@ -254,12 +276,24 @@ function normalizeExItem(it){
   }
 }
 
-// تصفير علامات الجولات إذا كانت من يوم سابق
 function resetStaleSets(st){
   const td = todayStr();
   (st.pr || []).forEach(p => (p.days || []).forEach(d => (d.items || []).forEach(it => {
     if (it.sd !== td && Array.isArray(it.sets)) it.sets.forEach(s => { s.done = false; });
   })));
+}
+
+function normalizeFoodItem(f){
+  if (f.g === 'تمر') f.g = 'تمر ومكسرات';
+  if (!Array.isArray(f.brands)) f.brands = [];
+  f.brands = f.brands.map(b => ({
+    name: String(b.name || '').trim(),
+    u: String(b.u || f.u || '100غ').trim(),
+    k: num(b.k),
+    p: num(b.p),
+    f: num(b.f),
+    h: num(b.h)
+  })).filter(b => b.name);
 }
 
 function loadState(){
@@ -278,13 +312,17 @@ function loadState(){
   s.body = Array.isArray(s.body) ? s.body : [];
   s.goal = s.goal && typeof s.goal === 'object' ? {k: num(s.goal.k)||2500, p: num(s.goal.p)||150} : {k:2500, p:150};
   s.wg = num(s.wg) || 3;
-  s.foods = Array.isArray(s.foods) && s.foods.length ? s.foods : SEED_FOODS.map(x=>({...x}));
-  if (s.fv !== 2) {
+  s.foods = Array.isArray(s.foods) && s.foods.length ? s.foods : SEED_FOODS.map(x=>({...x, brands:[]}));
+  if (s.fv !== 3) {
     SEED_FOODS.forEach(f => {
-      if (!s.foods.some(x => x.n === f.n && x.g === f.g)) s.foods.push({...f});
+      if (!s.foods.some(x => x.n === f.n && (x.g === f.g || (f.g === 'تمر ومكسرات' && x.g === 'تمر')))) {
+        s.foods.push({...f, brands:[]});
+      }
     });
-    s.fv = 2;
+    s.fv = 3;
   }
+  s.foods.forEach(normalizeFoodItem);
+
   const td = todayStr();
   if (!s.day || s.day.d !== td) {
     s.day = { d: td, eat: [], w: 0, s: {} };
@@ -295,7 +333,6 @@ function loadState(){
   }
   s.sup.forEach(item => {
     if (!item.id) item.id = 'sup_' + Math.random().toString(36).slice(2,8);
-    // ترحيل من الصيغ القديمة
     if (item.iv && !item.freq) {
       item.freq = num(item.iv) <= 1 ? 'daily' : 'every';
       item.everyDays = num(item.iv) || 1;
@@ -320,7 +357,7 @@ function loadState(){
 }
 
 let S = loadState();
-let V = { tab: 'home', pIdx: -1, openDays: {}, cat: 'الكل', q: '', sg: '', mo: '', report: '', backupText: '', logView: '', openLogDays: {}, openEx: {}, addEx: null };
+let V = { tab: 'home', pIdx: -1, openDays: {}, cat: 'الكل', q: '', sg: '', mo: '', report: '', backupText: '', logView: '', openLogDays: {}, openEx: {}, addEx: null, showUnitMenu: false };
 let timerState = { rem: 0, total: 60, label: '', iv: null };
 let toastTimer = null;
 
@@ -373,8 +410,6 @@ function toggleDayAccordion(pIdx, dIdx){
   render();
 }
 
-// ---- Supplements Schedule & Day Completion ----
-// daily: كل يوم | weekly: أيام محددة | every: كل N يوم (تُحسب من آخر مرة أُخذت فيها)
 function isSupDueOn(sup, dateStr = todayStr()){
   const diff = daysDiff(dateStr, sup.startDate || dateStr);
   if (diff < 0) return false;
@@ -441,7 +476,6 @@ function uncompleteAllSupsToday(){
   toast('تم إلغاء إنجاز مكملات اليوم');
 }
 
-// ---- Timer ----
 function startTimer(sec, label){
   clearInterval(timerState.iv);
   const s = Math.max(10, num(sec) || 60);
@@ -496,18 +530,15 @@ function renderTimer(){
   </div>`;
 }
 
-// ---- Modals ----
 function openModal(html){ $('#modalSheet').innerHTML = html; $('#modalRoot').classList.add('open'); }
-function closeModal(){ $('#modalRoot').classList.remove('open'); $('#modalSheet').innerHTML = ''; }
+function closeModal(){ V.showUnitMenu = false; $('#modalRoot').classList.remove('open'); $('#modalSheet').innerHTML = ''; }
 
-// ---- Workout Logic ----
 const allExercises = () => {
   const base = Object.entries(DEFAULT_EX).flatMap(([g, arr]) => arr.map(n => ({ n, g })));
   return base.concat(S.ex).map(x => ({ n: x.n, g: S.gmap[x.n] || x.g }));
 };
 const groupOf = n => (allExercises().find(x => x.n === n) || {}).g || 'صدر';
 
-// نسبة التقدم من الوزن فقط (متوسط أوزان الجولات مقابل وزن البداية)
 const calcPct = x => {
   normalizeExItem(x);
   const b = num(x.baseW);
@@ -515,7 +546,6 @@ const calcPct = x => {
   return ((avgW(x.sets) - b) / b) * 100;
 };
 
-// ملخص كامل (مع الأوزان) — للاستخدام الشخصي
 function formatSetsSummary(sets){
   if (!sets || !sets.length) return '';
   const allSameReps = sets.every(s => num(s.r) === num(sets[0].r));
@@ -526,7 +556,6 @@ function formatSetsSummary(sets){
   return sets.map((s, i) => `ج${i+1}: ${s.r}×${s.w}كغ`).join(' | ');
 }
 
-// ملخص بدون أوزان — لتقرير الصديق
 function formatSetsRepsOnly(sets){
   if (!sets || !sets.length) return '';
   const allSame = sets.every(s => num(s.r) === num(sets[0].r));
@@ -733,12 +762,10 @@ function updateSingleSet(pIdx, dIdx, kIdx, setIdx, field, val){
   const it = day.items[kIdx];
   normalizeExItem(it);
   it.sets[setIdx][field] = num(val);
-  // أول مرة يُدخل فيها وزن: يصبح هو وزن البداية
   if (!num(it.baseW) && avgW(it.sets) > 0) it.baseW = avgW(it.sets);
   it.r = it.sets[0].r;
   it.w = it.sets[0].w;
   S.last[it.e] = { s: it.s, r: it.r, w: it.w, t: it.t, sets: it.sets.map(x => ({r:x.r, w:x.w})) };
-  // إذا التمرين مسجّل اليوم، حدّث السجل بالقيم الجديدة
   if (it.done === todayStr()) logExerciseToHistory(p, day, it, it.n);
   save();
   render();
@@ -753,7 +780,6 @@ function updateRestTime(pIdx, dIdx, kIdx, val){
 
 function logExerciseToHistory(p, day, it, note){
   const td = todayStr();
-  // سجل واحد لكل (تاريخ + جدول + يوم + تمرين) حتى لا يتكرر
   const existingIdx = S.lw.findIndex(row => row.d === td && row.p === p.name && row.y === day.n && row.e === it.e);
   const record = {
     d: td,
@@ -784,7 +810,6 @@ function toggleSetDone(pIdx, dIdx, kIdx, setIdx){
   it.sets[setIdx].done = !wasDone;
   it.sd = todayStr();
 
-  // إلغاء تحديد جولة: يرجع التمرين غير مكتمل ويُحذف من سجل اليوم
   if (wasDone) {
     if (it.done === todayStr()) {
       it.done = '';
@@ -795,7 +820,6 @@ function toggleSetDone(pIdx, dIdx, kIdx, setIdx){
   }
 
   if (num(it.t) > 0) {
-    // شريك السوبر سيت: تمرين بنفس المجموعة لم يُكمل هذه الجولة بعد
     const partner = it.ss ? day.items.find((other, idx) => {
       if (idx === kIdx || other.ss !== it.ss) return false;
       normalizeExItem(other);
@@ -929,23 +953,29 @@ function buildProgReport(pIdx, friendMode){
   const p = S.pr[pIdx];
   const elapsed = Math.max(1, daysDiff(todayStr(), p.cr) || 1);
   let sumPct = 0, cnt = 0, vol = 0;
-  let out = `📋 ${p.name}\n` + (friendMode ? '' : `⏱ مدة الجدول: ${elapsed} يوم\n`);
+  let out = `📋 ${p.name}
+` + (friendMode ? '' : `⏱ مدة الجدول: ${elapsed} يوم
+`);
   p.days.forEach(d => {
-    out += `\n▪ ${d.n}\n`;
+    out += `
+▪ ${d.n}
+`;
     (d.items||[]).forEach(x => {
       normalizeExItem(x);
       const q = calcPct(x);
       if (num(x.baseW) > 0) { sumPct += q; cnt++; }
       vol += x.sets.reduce((s, st) => s + num(st.r) * num(st.w), 0);
-      // تقرير الصديق: جولات وعدات فقط، بدون أوزان ولا نسب
       const setsTxt = friendMode ? formatSetsRepsOnly(x.sets) : formatSetsSummary(x.sets);
       out += ` - ${x.e}${x.ss ? ` [سوبر سيت #${x.ss}]` : ''}: ${setsTxt}` +
-        (friendMode ? '' : ` | التقدم: ${q>=0?'+':''}${q.toFixed(0)}%`) + '\n';
+        (friendMode ? '' : ` | التقدم: ${q>=0?'+':''}${q.toFixed(0)}%`) + '
+';
     });
   });
   if (!friendMode) {
-    out += `\n🏋️ الحجم الإجمالي للجدول: ${Math.round(vol).toLocaleString()} كغ`;
-    if (cnt) out += `\n📈 متوسط التحسن: ${(sumPct / cnt).toFixed(0)}%`;
+    out += `
+🏋️ الحجم الإجمالي للجدول: ${Math.round(vol).toLocaleString()} كغ`;
+    if (cnt) out += `
+📈 متوسط التحسن: ${(sumPct / cnt).toFixed(0)}%`;
   }
   V.report = out;
   render();
@@ -958,38 +988,222 @@ async function copyOrShareReport(){
   if (ta) { ta.select(); document.execCommand('copy'); toast('تم النسخ'); }
 }
 
-// ---- Food & Smart Suggest ----
-function openAddFoodSheet(foodIdx, multiplier = 1){
+// ---- Food, Sub-Brands, Unit Picker & Smart Quantity/Weight ----
+function parseUnitGrams(u){
+  const s = String(u || '').trim();
+  const m = s.match(/(\d+(?:\.\d+)?)\s*(غ|غرام|جرام|g|مل|ml)/i);
+  if (m) return num(m[1]);
+  if (/^(غ|غرام|جرام|g|مل|ml)$/i.test(s)) return 1;
+  return null;
+}
+
+function syncFoodQuantityInputs(source){
+  const unitStr = ($('#m_fu')?.value || '').trim();
+  const baseGrams = parseUnitGrams(unitStr);
+  const multEl = $('#m_mult');
+  const amtEl = $('#m_amt');
+  if (!multEl || !amtEl) return;
+
+  if (source === 'unit') {
+    const m = Math.max(0.01, num(multEl.value) || 1);
+    amtEl.value = baseGrams ? +(m * baseGrams).toFixed(2) : m;
+  } else if (source === 'mult') {
+    const m = Math.max(0.01, num(multEl.value) || 1);
+    amtEl.value = baseGrams ? +(m * baseGrams).toFixed(2) : m;
+  } else if (source === 'amt') {
+    const a = Math.max(0.01, num(amtEl.value) || 1);
+    multEl.value = baseGrams ? +(a / baseGrams).toFixed(4) : a;
+  }
+
+  const m = Math.max(0.01, num(multEl.value) || 1);
+  const k = num($('#m_fk')?.value) * m;
+  const p = num($('#m_fp')?.value) * m;
+  const f = num($('#m_ff')?.value) * m;
+  const h = num($('#m_fh')?.value) * m;
+  const prevBox = $('#m_calcPreview');
+  if (prevBox) {
+    prevBox.textContent = `المحسوب للوجبة (${m}×): ${Math.round(k)} سعرة · بروتين ${+p.toFixed(1)}غ · كارب ${+h.toFixed(1)}غ · دهون ${+f.toFixed(1)}غ`;
+  }
+}
+
+function renderUnitPicker(curUnit){
+  V.showUnitMenu = !V.showUnitMenu;
+  const box = $('#unitPickerBox');
+  if (!box) return;
+  if (!V.showUnitMenu) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="unit-pop">
+    ${BASE_UNITS.map(u => `<button type="button" class="unit-btn ${curUnit===u?'active':''}" onclick="pickBaseUnit('${u}')">${u}</button>`).join('')}
+  </div>`;
+}
+
+function pickBaseUnit(u){
+  const inp = $('#m_fu');
+  if (inp) {
+    inp.value = u;
+    syncFoodQuantityInputs('unit');
+  }
+  V.showUnitMenu = false;
+  const box = $('#unitPickerBox');
+  if (box) box.innerHTML = '';
+}
+
+function openAddFoodSheet(foodIdx, multiplier = 1, brandIdx = null){
+  V.showUnitMenu = false;
   const isNew = foodIdx == null;
-  const f = isNew ? { n:'', g: FOOD_CATS.includes(V.cat)?V.cat:'لحوم', u:'100غ', k:0, p:0, f:0, h:0, v:false } : S.foods[foodIdx];
+  const baseFood = isNew
+    ? { n:'', g: FOOD_CATS.includes(V.cat) && V.cat!=='الكل' && V.cat!=='⭐' ? V.cat : 'لحوم', u:'100غ', k:0, p:0, f:0, h:0, v:false, brands:[] }
+    : S.foods[foodIdx];
+  normalizeFoodItem(baseFood);
+
+  const br = (!isNew && brandIdx != null && baseFood.brands[brandIdx]) ? baseFood.brands[brandIdx] : null;
+  const f = br ? { ...baseFood, n: `${baseFood.n} — ${br.name}`, u: br.u, k: br.k, p: br.p, f: br.f, h: br.h } : baseFood;
   const m0 = num(multiplier) || 1;
+  const baseGrams = parseUnitGrams(f.u);
+  const amt0 = baseGrams ? +(m0 * baseGrams).toFixed(2) : m0;
+
   openModal(`
-    <h3 style="margin:0 0 10px">${isNew ? '➕ إضافة صنف غذائي جديد' : '🍽️ تسجيل أو تعديل: ' + esc(f.n)}</h3>
+    <h3 style="margin:0 0 10px">${isNew ? '➕ إضافة صنف غذائي جديد' : (br ? '🏷️ ماركة: ' + esc(f.n) : '🍽️ تسجيل أو تعديل: ' + esc(f.n))}</h3>
     <div class="grid2" style="margin-bottom:8px">
-      <div><label class="lbl">اسم الصنف</label><input id="m_fn" value="${esc(f.n)}"></div>
+      <div><label class="lbl">${br ? 'الاسم المعروض' : 'اسم الصنف'}</label><input id="m_fn" value="${esc(f.n)}"></div>
       <div><label class="lbl">التصنيف</label><select id="m_fg">${FOOD_CATS.map(c=>`<option ${c===f.g?'selected':''}>${c}</option>`).join('')}</select></div>
     </div>
     <div class="grid2" style="margin-bottom:8px">
-      <div><label class="lbl">الوحدة الأساسية</label><input id="m_fu" value="${esc(f.u||'حبة')}"></div>
-      <div><label class="lbl">الكمية المراد إضافتها لليوم</label><input id="m_mult" type="number" step="0.25" min="0.1" value="${m0}"></div>
+      <div>
+        <label class="lbl">الوحدة الأساسية (اضغط للاختيار أو اكتب)</label>
+        <input id="m_fu" value="${esc(f.u||'100غ')}" onclick="renderUnitPicker(this.value)" oninput="syncFoodQuantityInputs('unit')" placeholder="حبة، 100غ، غرام...">
+        <div id="unitPickerBox"></div>
+      </div>
+      <div>
+        <label class="lbl">${baseGrams ? 'الوزن / الكمية بالوحدة (مثال: 40)' : 'الكمية المراد إضافتها لليوم'}</label>
+        <input id="m_amt" type="number" step="any" min="0.01" value="${amt0}" oninput="syncFoodQuantityInputs('amt')">
+      </div>
     </div>
-    <div class="grid4" style="margin-bottom:10px">
-      <div><label class="lbl">سعرات</label><input id="m_fk" type="number" step="any" value="${f.k}"></div>
-      <div><label class="lbl">بروتين (غ)</label><input id="m_fp" type="number" step="any" value="${f.p}"></div>
-      <div><label class="lbl">دهون (غ)</label><input id="m_ff" type="number" step="any" value="${f.f}"></div>
-      <div><label class="lbl">كارب (غ)</label><input id="m_fh" type="number" step="any" value="${f.h}"></div>
+    <div style="margin-bottom:8px">
+      <label class="lbl">معامل الضرب (×)</label>
+      <input id="m_mult" type="number" step="any" min="0.01" value="${m0}" oninput="syncFoodQuantityInputs('mult')">
+    </div>
+    <div class="grid4" style="margin-bottom:8px">
+      <div><label class="lbl">سعرات</label><input id="m_fk" type="number" step="any" value="${f.k}" oninput="syncFoodQuantityInputs('mult')"></div>
+      <div><label class="lbl">بروتين (غ)</label><input id="m_fp" type="number" step="any" value="${f.p}" oninput="syncFoodQuantityInputs('mult')"></div>
+      <div><label class="lbl">دهون (غ)</label><input id="m_ff" type="number" step="any" value="${f.f}" oninput="syncFoodQuantityInputs('mult')"></div>
+      <div><label class="lbl">كارب (غ)</label><input id="m_fh" type="number" step="any" value="${f.h}" oninput="syncFoodQuantityInputs('mult')"></div>
+    </div>
+    <div id="m_calcPreview" class="card-soft muted" style="margin-bottom:8px">
+      المحسوب للوجبة (${m0}×): ${Math.round(f.k*m0)} سعرة · بروتين ${+(f.p*m0).toFixed(1)}غ · كارب ${+(f.h*m0).toFixed(1)}غ · دهون ${+(f.f*m0).toFixed(1)}غ
     </div>
     <div class="row-wrap" style="margin-bottom:10px">
-      <button class="sm x" onclick="$('#m_mult').value=0.5">×0.5</button>
-      <button class="sm x" onclick="$('#m_mult').value=1">×1</button>
-      <button class="sm x" onclick="$('#m_mult').value=1.5">×1.5</button>
-      <button class="sm x" onclick="$('#m_mult').value=2">×2</button>
+      <button type="button" class="sm x" onclick="$('#m_mult').value=0.5;syncFoodQuantityInputs('mult')">×0.5</button>
+      <button type="button" class="sm x" onclick="$('#m_mult').value=1;syncFoodQuantityInputs('mult')">×1</button>
+      <button type="button" class="sm x" onclick="$('#m_mult').value=1.5;syncFoodQuantityInputs('mult')">×1.5</button>
+      <button type="button" class="sm x" onclick="$('#m_mult').value=2;syncFoodQuantityInputs('mult')">×2</button>
     </div>
     <div class="row">
-      ${!isNew ? `<button class="x" style="flex:1" onclick="saveFoodOnly(${foodIdx})">💾 حفظ القيم فقط</button>` : ''}
-      <button style="flex:2" onclick="saveAndEatFood(${isNew ? 'null' : foodIdx})">✅ ${isNew ? 'حفظ وإضافة لليوم' : 'إضافة لوجبة اليوم'}</button>
+      ${(!isNew && br == null) ? `<button type="button" class="x" style="flex:1" onclick="saveFoodOnly(${foodIdx})">💾 حفظ القيم فقط</button>` : ''}
+      <button type="button" style="flex:2" onclick="saveAndEatFood(${isNew ? 'null' : foodIdx}, ${br != null ? brandIdx : 'null'})">✅ ${isNew ? 'حفظ وإضافة لليوم' : 'إضافة لوجبة اليوم'}</button>
     </div>
   `);
+}
+
+function openFoodBrandsModal(foodIdx){
+  const f = S.foods[foodIdx];
+  normalizeFoodItem(f);
+  openModal(`
+    <div class="row" style="margin-bottom:6px">
+      <h3 style="margin:0">🏷️ أنواع / ماركات: ${esc(f.n)}</h3>
+      <button type="button" class="sm" onclick="openAddBrandModal(${foodIdx})">+ إضافة ماركة</button>
+    </div>
+    <p class="muted" style="margin:0 0 10px">التصنيف: <b>${esc(f.g)}</b> · الصنف الأساسي: ${f.k} سعرة لكل ${esc(f.u)}</p>
+
+    <div class="card-soft row" style="border-right:4px solid var(--o)">
+      <div>
+        <b>${esc(f.n)} (الأساسي)</b>
+        <div class="muted">${f.k} سعرة · بروتين ${f.p}غ · كارب ${f.h}غ · دهون ${f.f}غ (${esc(f.u)})</div>
+      </div>
+      <div class="row-wrap">
+        <button type="button" class="sm" onclick="closeModal();quickEat(${foodIdx},1)">+1</button>
+        <button type="button" class="sm x" onclick="openAddFoodSheet(${foodIdx},1,null)">كمية / ✎</button>
+      </div>
+    </div>
+
+    ${f.brands.length ? f.brands.map((b, bIdx) => `
+      <div class="card-soft row">
+        <div style="flex:1">
+          <b>${esc(b.name)}</b> <span class="muted">(${esc(b.u || f.u)})</span>
+          <div class="muted">${b.k} سعرة · بروتين ${b.p}غ · كارب ${b.h}غ · دهون ${b.f}غ</div>
+        </div>
+        <div class="row-wrap">
+          <button type="button" class="sm" onclick="closeModal();quickEatBrand(${foodIdx},${bIdx},1)">+1</button>
+          <button type="button" class="sm x" onclick="openAddFoodSheet(${foodIdx},1,${bIdx})">كمية</button>
+          <button type="button" class="sm x" onclick="deleteFoodBrand(${foodIdx},${bIdx})">✕</button>
+        </div>
+      </div>
+    `).join('') : '<div class="muted" style="margin:8px 0 12px">لم تضف ماركات أو أنواع فرعية بعد تحت هذا الصنف. اضغط «+ إضافة ماركة» لإضافة كيندر، جالكسي، إلخ.</div>'}
+
+    <button type="button" class="x" style="width:100%;margin-top:8px" onclick="closeModal()">إغلاق</button>
+  `);
+}
+
+function openAddBrandModal(foodIdx){
+  V.showUnitMenu = false;
+  const parent = S.foods[foodIdx];
+  openModal(`
+    <h3 style="margin:0 0 8px">➕ إضافة ماركة / نوع تحت «${esc(parent.n)}»</h3>
+    <div class="grid2" style="margin-bottom:8px">
+      <div><label class="lbl">اسم الماركة أو النوع</label><input id="br_name" placeholder="مثال: كيندر، جالكسي، دارك 70%"></div>
+      <div>
+        <label class="lbl">الوحدة الأساسية</label>
+        <input id="br_u" value="${esc(parent.u || '100غ')}" onclick="renderBrandUnitPicker(this.value)">
+        <div id="brandUnitBox"></div>
+      </div>
+    </div>
+    <div class="grid4" style="margin-bottom:10px">
+      <div><label class="lbl">سعرات</label><input id="br_k" type="number" step="any" value="${parent.k || 0}"></div>
+      <div><label class="lbl">بروتين (غ)</label><input id="br_p" type="number" step="any" value="${parent.p || 0}"></div>
+      <div><label class="lbl">دهون (غ)</label><input id="br_f" type="number" step="any" value="${parent.f || 0}"></div>
+      <div><label class="lbl">كارب (غ)</label><input id="br_h" type="number" step="any" value="${parent.h || 0}"></div>
+    </div>
+    <div class="row">
+      <button type="button" class="x" style="flex:1" onclick="openFoodBrandsModal(${foodIdx})">→ رجوع</button>
+      <button type="button" style="flex:2" onclick="saveFoodBrand(${foodIdx})">💾 حفظ الماركة</button>
+    </div>
+  `);
+}
+
+function renderBrandUnitPicker(curUnit){
+  const box = $('#brandUnitBox');
+  if (!box) return;
+  if (box.innerHTML.trim()) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="unit-pop">
+    ${BASE_UNITS.map(u => `<button type="button" class="unit-btn ${curUnit===u?'active':''}" onclick="$('#br_u').value='${u}';$('#brandUnitBox').innerHTML=''">${u}</button>`).join('')}
+  </div>`;
+}
+
+function saveFoodBrand(foodIdx){
+  const f = S.foods[foodIdx];
+  normalizeFoodItem(f);
+  const name = ($('#br_name').value || '').trim();
+  if (!name) { toast('اكتب اسم الماركة أو النوع أولاً'); return; }
+  f.brands.push({
+    name,
+    u: ($('#br_u').value || f.u || '100غ').trim(),
+    k: num($('#br_k').value),
+    p: num($('#br_p').value),
+    f: num($('#br_f').value),
+    h: num($('#br_h').value)
+  });
+  save();
+  render();
+  openFoodBrandsModal(foodIdx);
+  toast(`تمت إضافة «${name}» تحت ${f.n} ✅`);
+}
+
+function deleteFoodBrand(foodIdx, brandIdx){
+  const f = S.foods[foodIdx];
+  f.brands.splice(brandIdx, 1);
+  save();
+  render();
+  openFoodBrandsModal(foodIdx);
+  toast('تم حذف الماركة');
 }
 
 function saveFoodOnly(idx){
@@ -1006,23 +1220,37 @@ function saveFoodOnly(idx){
   toast('تم تحديث بيانات الصنف ✅');
 }
 
-function saveAndEatFood(idx){
+function saveAndEatFood(idx, brandIdx = null){
   const name = ($('#m_fn').value||'').trim();
   if (!name) { toast('اكتب اسم الصنف أولاً'); return; }
+  const unit = ($('#m_fu').value||'').trim() || '100غ';
   const item = {
     g: $('#m_fg').value,
     n: name,
-    u: ($('#m_fu').value||'').trim() || 'حبة',
+    u: unit,
     k: num($('#m_fk').value),
     p: num($('#m_fp').value),
     f: num($('#m_ff').value),
     h: num($('#m_fh').value)
   };
-  const mult = Math.max(0.1, num($('#m_mult').value) || 1);
-  if (idx === null) S.foods.push({ ...item, v: false });
-  else Object.assign(S.foods[idx], item);
+  const mult = Math.max(0.01, num($('#m_mult').value) || 1);
+  const amtVal = num($('#m_amt')?.value);
+  const baseGrams = parseUnitGrams(unit);
+  const labelQty = baseGrams && amtVal > 0 && Math.abs(amtVal - mult * baseGrams) < 0.05
+    ? `${amtVal}${/مل/i.test(unit)?'مل':'غ'}`
+    : `×${mult}`;
+
+  if (idx === null) {
+    S.foods.push({ ...item, v: false, brands: [] });
+  } else if (brandIdx != null && S.foods[idx].brands && S.foods[idx].brands[brandIdx]) {
+    const b = S.foods[idx].brands[brandIdx];
+    b.u = item.u; b.k = item.k; b.p = item.p; b.f = item.f; b.h = item.h;
+  } else {
+    Object.assign(S.foods[idx], item);
+  }
+
   S.day.eat.push({
-    n: mult === 1 ? item.n : `${item.n} (×${mult})`,
+    n: mult === 1 && !baseGrams ? item.n : `${item.n} (${labelQty})`,
     k: item.k * mult,
     p: item.p * mult,
     f: item.f * mult,
@@ -1044,6 +1272,22 @@ function quickEat(idx, mult = 1){
   });
   commit();
   toast(`أُضيف ${f.n} (${Math.round(f.k * mult)} سعرة)`);
+}
+
+function quickEatBrand(foodIdx, brandIdx, mult = 1){
+  const f = S.foods[foodIdx];
+  const b = f.brands[brandIdx];
+  if (!b) return;
+  const label = `${f.n} — ${b.name}`;
+  S.day.eat.push({
+    n: mult === 1 ? label : `${label} (×${mult})`,
+    k: b.k * mult,
+    p: b.p * mult,
+    f: b.f * mult,
+    h: b.h * mult
+  });
+  commit();
+  toast(`أُضيف ${label} (${Math.round(b.k * mult)} سعرة)`);
 }
 
 function smartSuggest(){
@@ -1364,8 +1608,6 @@ function renderProgDetail(){
   const pIdx = V.pIdx;
   const p = S.pr[pIdx];
   if (!p) return renderProgList();
-  const exPool = allExercises();
-  const groups = Object.keys(MUSCLE_COLORS);
 
   return `
     <div class="row" style="margin-bottom:8px">
@@ -1497,36 +1739,40 @@ function renderProgDetail(){
   `;
 }
 
-// قائمة الأصناف تُحدَّث لوحدها أثناء البحث حتى لا يضيع التركيز من خانة الكتابة
 function foodListHtml(){
   const q = (V.q || '').trim().toLowerCase();
   const filtered = S.foods
-    .map((f, idx) => ({ f, idx }))
+    .map((f, idx) => { normalizeFoodItem(f); return { f, idx }; })
     .filter(({ f }) => {
       const catOk = V.cat === 'الكل' || (V.cat === '⭐' ? !!f.v : f.g === V.cat);
-      const qOk = !q || f.n.toLowerCase().includes(q) || f.g.toLowerCase().includes(q);
+      const brandMatch = f.brands.some(b => b.name.toLowerCase().includes(q));
+      const qOk = !q || f.n.toLowerCase().includes(q) || f.g.toLowerCase().includes(q) || brandMatch;
       return catOk && qOk;
     })
     .sort((a,b) => (b.f.v?1:0) - (a.f.v?1:0));
 
   if (!filtered.length) return '<div class="card-soft muted">لا توجد أصناف مطابقة. استخدم «+ صنف جديد» لإضافتها.</div>';
 
-  return filtered.map(({ f, idx }) => `
+  return filtered.map(({ f, idx }) => {
+    const bCount = f.brands.length;
+    return `
     <div class="card-soft row">
-      <div style="flex:1">
+      <div style="flex:1;cursor:pointer" onclick="openFoodBrandsModal(${idx})">
         <div class="row-wrap">
-          <span style="cursor:pointer;font-size:16px" onclick="S.foods[${idx}].v=!S.foods[${idx}].v;commit()">${f.v?'⭐':'☆'}</span>
+          <span style="cursor:pointer;font-size:16px" onclick="event.stopPropagation();S.foods[${idx}].v=!S.foods[${idx}].v;commit()">${f.v?'⭐':'☆'}</span>
           <b>${esc(f.n)}</b>
           <span class="muted">(${esc(f.u)})</span>
+          ${bCount ? `<span class="pill-status st-ss1">🏷️ ${bCount} ماركة/نوع</span>` : ''}
         </div>
         <div class="muted" style="margin-top:2px">${f.k} سعرة · بروتين ${f.p}غ · كارب ${f.h}غ · دهون ${f.f}غ</div>
       </div>
       <div class="row-wrap">
+        <button class="sm x" onclick="openFoodBrandsModal(${idx})" title="الأنواع والماركات">🏷️ أنواع</button>
         <button class="sm" onclick="quickEat(${idx},1)" title="إضافة وحدة واحدة">+1</button>
-        <button class="sm x" onclick="openAddFoodSheet(${idx},1)" title="تحديد كمية أو تعديل">كمية / ✎</button>
+        <button class="sm x" onclick="openAddFoodSheet(${idx},1)" title="تحديد كمية أو وزن أو تعديل">كمية / ✎</button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function updateFoodList(){
@@ -1580,7 +1826,7 @@ function renderFood(){
     ` : ''}
 
     <div style="margin-bottom:8px">
-      <input placeholder="ابحث عن صنف غذائي (دجاج، رز، شوفان، تمر...)" value="${esc(V.q)}" oninput="V.q=this.value;updateFoodList()">
+      <input placeholder="ابحث عن صنف أو ماركة (شوكولاتة، كيندر، جالكسي، تمر...)" value="${esc(V.q)}" oninput="V.q=this.value;updateFoodList()">
     </div>
 
     <div class="chips">
@@ -1704,7 +1950,6 @@ function renderLog(){
     <button class="sm x" onclick="clearAllLog()">مسح الكل</button>
   </div>`;
 
-  // ---- داخل سجل الأكل
   if (V.logView === 'food') {
     return `
       <div class="row" style="margin-bottom:8px">
@@ -1722,7 +1967,6 @@ function renderLog(){
     `;
   }
 
-  // ---- داخل سجل التمارين: الأيام مسكّرة، اضغط على اليوم لتظهر تمارينه
   if (V.logView === 'work') {
     return `
       <div class="row" style="margin-bottom:8px">
@@ -1760,7 +2004,6 @@ function renderLog(){
     `;
   }
 
-  // ---- الصفحة الرئيسية للسجل: مربعين
   return `
     <div class="row" style="margin-bottom:8px">
       <h2 style="margin:0">📈 السجل</h2>

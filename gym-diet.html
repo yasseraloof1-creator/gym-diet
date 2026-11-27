@@ -104,6 +104,7 @@ label.lbl{display:block;font-size:11px;color:var(--m);margin-bottom:3px;font-wei
 .st-due{background:#fef3c7;color:#b45309}
 .st-rest{background:#f1f5f9;color:#64748b}
 .st-ok{background:#d1fae5;color:#065f46}
+.st-miss{background:#fee2e2;color:#b91c1c}
 .st-ss1{background:#ede9fe;color:#6d28d9}
 .st-ss2{background:#fce7f3;color:#be185d}
 .st-ss3{background:#e0f2fe;color:#0369a1}
@@ -335,11 +336,12 @@ function loadState(){
 
   const td = todayStr();
   if (!s.day || s.day.d !== td) {
-    s.day = { d: td, eat: [], w: 0, s: {} };
+    s.day = { d: td, eat: [], w: 0, s: {}, ms: {} };
   } else {
     s.day.eat = Array.isArray(s.day.eat) ? s.day.eat : [];
     s.day.w = num(s.day.w);
     s.day.s = s.day.s && typeof s.day.s === 'object' ? s.day.s : {};
+    s.day.ms = s.day.ms && typeof s.day.ms === 'object' ? s.day.ms : {};
   }
   s.sup.forEach(item => {
     if (!item.id) item.id = 'sup_' + Math.random().toString(36).slice(2,8);
@@ -389,7 +391,6 @@ function playLoudAlarm(){
     if (!audioCtx) audioCtx = new Ctx();
     if (audioCtx.state === 'suspended') audioCtx.resume();
 
-    // سلسلة نغمات عالية ومرتفعة مدة 4 ثوانٍ
     const notes = [880, 1174.66, 880, 1318.51, 987.77, 1318.51, 1046.5, 1567.98];
     notes.forEach((freq, i) => {
       const osc = audioCtx.createOscillator();
@@ -458,9 +459,10 @@ const dayTotals = () => S.day.eat.reduce((a,x)=>({
 function save(){
   const td = todayStr();
   if (S.day.d !== td) {
-    S.day = { d: td, eat: [], w: 0, s: {} };
+    S.day = { d: td, eat: [], w: 0, s: {}, ms: {} };
     resetStaleSets(S);
   }
+  if (!S.day.ms || typeof S.day.ms !== 'object') S.day.ms = {};
   const t = dayTotals();
   if (S.day.eat.length) {
     S.lf[td] = { k: Math.round(t.k), p: Math.round(t.p), f: Math.round(t.f), h: Math.round(t.h), i: S.day.eat.map(x => x.n) };
@@ -489,8 +491,10 @@ function toggleDayAccordion(pIdx, dIdx){
   render();
 }
 
+// ---- Fixed-Schedule Supplements (No Shifting Missed Days) ----
 function isSupDueOn(sup, dateStr = todayStr()){
-  const diff = daysDiff(dateStr, sup.startDate || dateStr);
+  const start = sup.startDate || dateStr;
+  const diff = daysDiff(dateStr, start);
   if (diff < 0) return false;
   if (sup.freq === 'daily') return true;
   if (sup.freq === 'weekly') {
@@ -498,15 +502,43 @@ function isSupDueOn(sup, dateStr = todayStr()){
     const list = Array.isArray(sup.daysOfWeek) && sup.daysOfWeek.length ? sup.daysOfWeek : [0];
     return list.includes(dow);
   }
+  // جدول ثابت مبني على تاريخ البداية (startDate) حتى لا يزحف الموعد عند نسيان جرعة
   const step = Math.max(1, num(sup.everyDays) || 1);
-  if (!sup.last || sup.last === dateStr) return true;
-  return daysDiff(dateStr, sup.last) >= step;
+  return (diff % step) === 0;
 }
 
-function supDaysLeft(sup){
-  if (sup.freq !== 'every' || !sup.last) return null;
+function supDaysUntilNext(sup, dateStr = todayStr()){
+  const start = sup.startDate || dateStr;
+  const diff = daysDiff(dateStr, start);
+  if (diff < 0) return Math.abs(diff);
+  if (sup.freq === 'daily') return 0;
+  if (sup.freq === 'weekly') {
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    const list = Array.isArray(sup.daysOfWeek) && sup.daysOfWeek.length ? sup.daysOfWeek : [0];
+    for (let i = 0; i < 7; i++) {
+      if (list.includes((dow + i) % 7)) return i;
+    }
+    return null;
+  }
   const step = Math.max(1, num(sup.everyDays) || 1);
-  return Math.max(0, step - daysDiff(todayStr(), sup.last));
+  const rem = diff % step;
+  return rem === 0 ? 0 : (step - rem);
+}
+
+function supPrevScheduledDate(sup, dateStr = todayStr()){
+  const start = sup.startDate || dateStr;
+  for (let i = 1; i <= 366; i++) {
+    const prevD = todayStr(i);
+    if (daysDiff(prevD, start) < 0) return null;
+    if (isSupDueOn(sup, prevD)) return prevD;
+  }
+  return null;
+}
+
+function wasLastScheduledMissed(sup){
+  const prevD = supPrevScheduledDate(sup, todayStr());
+  if (!prevD) return false;
+  return sup.last !== prevD;
 }
 
 function freqLabel(sup){
@@ -522,16 +554,32 @@ function freqLabel(sup){
 }
 
 const isSupTakenToday = sup => !!S.day.s[sup.id];
+const isSupMissedToday = sup => !!(S.day.ms && S.day.ms[sup.id]);
 
 function markSup(sup, taken){
+  if (!S.day.ms) S.day.ms = {};
   if (taken) {
     if (!S.day.s[sup.id]) sup.prevLast = sup.last || '';
     sup.last = todayStr();
     S.day.s[sup.id] = true;
+    S.day.ms[sup.id] = false;
   } else {
     if (S.day.s[sup.id]) sup.last = sup.prevLast || '';
     S.day.s[sup.id] = false;
   }
+}
+
+function markSupMissedToday(id){
+  const sup = S.sup.find(x => x.id === id);
+  if (!sup) return;
+  if (!S.day.ms) S.day.ms = {};
+  const nextMissed = !isSupMissedToday(sup);
+  if (nextMissed && isSupTakenToday(sup)) {
+    markSup(sup, false);
+  }
+  S.day.ms[sup.id] = nextMissed;
+  commit();
+  toast(nextMissed ? 'سُجّل كفائت اليوم — لن ينتقل لليوم التالي ⏭️' : 'تم إلغاء علامة الفائت');
 }
 
 function toggleSup(id){
@@ -542,8 +590,8 @@ function toggleSup(id){
 }
 
 function completeAllDueSupsToday(){
-  const due = S.sup.filter(s => isSupDueOn(s));
-  if (!due.length) { toast('لا توجد حبوب أو مكملات مستحقة اليوم'); return; }
+  const due = S.sup.filter(s => isSupDueOn(s) && !isSupMissedToday(s));
+  if (!due.length) { toast('لا توجد حبوب أو مكملات متبقية للإنجاز اليوم'); return; }
   due.forEach(s => markSup(s, true));
   commit();
   toast('تم تسجيل إنجاز مكملات اليوم ✅');
@@ -590,7 +638,6 @@ function startTimer(sec, label){
   renderTimer();
 }
 
-// إعادة ضبط العداد على مدة سريعة جديدة أثناء عمله
 function setActiveTimerPreset(sec){
   const s = Math.max(5, num(sec));
   startTimer(s, timerState.label || 'راحة بين الجولات');
@@ -1528,7 +1575,7 @@ function openSupSheet(){
           <option value="other">مدة أخرى (أكتبها أنا) ✏️</option>
         </select>
       </div>
-      <div><label class="lbl">تاريخ البداية</label><input id="sp_start" type="date" value="${td}"></div>
+      <div><label class="lbl">تاريخ البداية (يثبت عليه الجدول)</label><input id="sp_start" type="date" value="${td}"></div>
     </div>
     <div id="sp_weeklyBox" style="display:none;margin-bottom:8px">
       <label class="lbl">اختر أيام الأسبوع</label>
@@ -1654,12 +1701,12 @@ function renderHome(){
   });
 
   const dueSups = S.sup.filter(s => isSupDueOn(s));
-  const pendingSups = dueSups.filter(s => !isSupTakenToday(s));
+  const pendingSups = dueSups.filter(s => !isSupTakenToday(s) && !isSupMissedToday(s));
   const alerts = [];
   if (pendingSups.length) {
     alerts.push({ txt: `💊 باقي ${pendingSups.length} حبة/مكمل مستحق اليوم: ${pendingSups.map(x=>x.n).join('، ')}`, tab: 'sup' });
   } else if (dueSups.length) {
-    alerts.push({ txt: `✅ أنجزت جميع مكملات اليوم (${dueSups.length})`, tab: 'sup' });
+    alerts.push({ txt: `✅ أُغلق ملف مكملات اليوم (${dueSups.length})`, tab: 'sup' });
   }
   if (num(S.day.w) < num(S.wg)) {
     const remW = +(num(S.wg) - num(S.day.w)).toFixed(2);
@@ -2053,7 +2100,8 @@ function renderSup(){
   const dueList = S.sup.filter(s => isSupDueOn(s, td));
   const restList = S.sup.filter(s => !isSupDueOn(s, td));
   const takenCount = dueList.filter(s => isSupTakenToday(s)).length;
-  const allDueDone = dueList.length > 0 && takenCount === dueList.length;
+  const closedCount = dueList.filter(s => isSupTakenToday(s) || isSupMissedToday(s)).length;
+  const allDueDone = dueList.length > 0 && closedCount === dueList.length;
 
   const remWater = Math.max(0, +(num(S.wg) - num(S.day.w)).toFixed(2));
 
@@ -2064,7 +2112,7 @@ function renderSup(){
         <button class="sm" onclick="openSupSheet()">+ إضافة مكمل</button>
       </div>
       <div class="muted" style="margin-bottom:10px">
-        مستحق اليوم: <b>${takenCount} / ${dueList.length}</b> · يُحسب الجدول تلقائياً حسب الفترة المختارة لكل حبة
+        مستحق اليوم: <b>${takenCount} / ${dueList.length}</b> · الجدول ثابت ولا يرحّل الجرعة الفائتة لليوم التالي
       </div>
 
       ${dueList.length ? `
@@ -2078,31 +2126,41 @@ function renderSup(){
       ${dueList.map(s => {
         const idx = S.sup.indexOf(s);
         const taken = isSupTakenToday(s);
-        return `<div class="card-soft row" style="${taken?'background:#f0fdf4;border-color:#bbf7d0':''}">
+        const missed = isSupMissedToday(s);
+        const prevMissed = !taken && !missed && wasLastScheduledMissed(s);
+        return `<div class="card-soft row" style="${taken?'background:#f0fdf4;border-color:#bbf7d0':(missed?'background:#fef2f2;border-color:#fecaca':'')}">
           <label style="display:flex;align-items:flex-start;gap:8px;flex:1;cursor:pointer">
             <input type="checkbox" ${taken?'checked':''} onchange="toggleSup('${s.id}')" style="width:18px;height:18px;margin-top:2px">
             <div>
               <b>${esc(s.n)}</b> ${s.d ? `<span class="muted">(${esc(s.d)})</span>` : ''}
               <div style="margin-top:4px">
-                <span class="pill-status ${taken?'st-ok':'st-due'}">${taken?'✓ أُخذ اليوم':'اليوم لازم تاخذها'}</span>
+                <span class="pill-status ${taken?'st-ok':(missed?'st-miss':'st-due')}">
+                  ${taken ? '✓ أُخذ اليوم' : (missed ? '⏭️ فات اليوم (لا يُنقل للغد)' : 'اليوم لازم تاخذها')}
+                </span>
+                ${prevMissed ? '<span class="pill-status st-miss" style="margin-right:4px">فاتت المرة السابقة</span>' : ''}
                 <span class="muted" style="margin-right:6px">${esc(freqLabel(s))}</span>
               </div>
             </div>
           </label>
-          <button class="sm x" onclick="S.sup.splice(${idx},1);commit()">✕</button>
+          <div class="row-wrap">
+            ${!taken ? `<button class="sm x" onclick="markSupMissedToday('${s.id}')" title="تأكيد أن الجرعة فاتت اليوم ولن تُنقل لليوم التالي">${missed ? 'تراجع' : 'فاتني'}</button>` : ''}
+            <button class="sm x" onclick="S.sup.splice(${idx},1);commit()">✕</button>
+          </div>
         </div>`;
       }).join('')}
 
       ${restList.length ? `
-        <div class="muted" style="margin:12px 0 6px;font-weight:700">غير مستحقة اليوم حسب الجدول</div>
+        <div class="muted" style="margin:12px 0 6px;font-weight:700">غير مستحقة اليوم حسب الجدول الثابت</div>
         ${restList.map(s => {
           const idx = S.sup.indexOf(s);
-          const left = supDaysLeft(s);
-          return `<div class="card-soft row" style="opacity:.78">
+          const nextIn = supDaysUntilNext(s, td);
+          const prevMissed = wasLastScheduledMissed(s);
+          return `<div class="card-soft row" style="opacity:.82">
             <div>
               <b>${esc(s.n)}</b> ${s.d ? `<span class="muted">(${esc(s.d)})</span>` : ''}
               <div style="margin-top:4px">
-                <span class="pill-status st-rest">اليوم مو موعدها${left ? ' — باقي ' + left + ' يوم' : ''}</span>
+                <span class="pill-status st-rest">اليوم مو موعدها${nextIn ? ' — الموعد القادم بعد ' + nextIn + ' يوم' : ''}</span>
+                ${prevMissed ? '<span class="pill-status st-miss" style="margin-right:4px">فاتك آخر موعد (غير مرحّل)</span>' : ''}
                 <span class="muted" style="margin-right:6px">${esc(freqLabel(s))}</span>
               </div>
             </div>

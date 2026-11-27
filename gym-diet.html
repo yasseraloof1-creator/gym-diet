@@ -192,7 +192,7 @@ const FOOD_CATS = ['فواكه','خضار','تمر ومكسرات','حليب','�
 const BASE_UNITS = ['حبة','100غ','غرام','مل','مربع','سكوب','ملعقة','كوب'];
 
 const FREQS = [
-  ['كل يوم',1],['يوم إي يوم لا (كل يومين)',2],['كل 3 أيام',3],['كل أسبوع',7],['كل أسبوعين',14],
+  ['كل يوم',1],['كل يومين',2],['كل 3 أيام',3],['كل أسبوع',7],['كل أسبوعين',14],
   ['كل شهر',30],['كل شهرين',60],['كل 3 أشهر',90],['كل 6 أشهر',180],['كل سنة',365]
 ];
 
@@ -1733,21 +1733,7 @@ function renderHome(){
     return `<div class="wday ${off===0?'today':''}">${dn}<b>${+d.slice(8)}</b>${hasW?'<div class="dot"></div>':''}</div>`;
   }).join('');
 
-  const permState = ('Notification' in window) ? Notification.permission : 'unsupported';
-
   return `
-    <div class="card">
-      <div class="row" style="margin-bottom:8px">
-        <b>🔔 تنبيهات الصوت والمؤقت</b>
-        <button class="sm ${permState==='granted'?'ok':''}" onclick="requestNotificationPermission()">
-          ${permState==='granted' ? '🔊 مفعّل (اختبار صوت)' : '🔔 تفعيل الإشعارات'}
-        </button>
-      </div>
-      <div class="muted">
-        راحة الجولة الافتراضية: <b>${defaultNormalRest()}ث</b> · راحة السوبر سيت: <b>${defaultSsRest()}ث</b>
-      </div>
-    </div>
-
     <div class="card">
       <div class="row" style="margin-bottom:8px">
         <b>🍽️ ملخص التغذية اليوم</b>
@@ -1763,18 +1749,6 @@ function renderHome(){
       </div>
       <div class="muted" style="margin-top:8px">كارب: ${Math.round(t.h)}غ · دهون: ${Math.round(t.f)}غ</div>
     </div>
-
-    ${activeProg ? `
-      <div class="card" style="background:linear-gradient(135deg,#7c3aed,#db2777);color:#fff;border:0">
-        <div class="row">
-          <div>
-            <div style="font-size:11px;opacity:.9">⭐ الجدول التدريبي المعتمد</div>
-            <b style="font-size:16px">${esc(activeProg.name)}</b>
-          </div>
-          <button style="background:#fff;color:var(--o)" class="sm" onclick="openProg(${S.pr.indexOf(activeProg)})">فتح التمرين</button>
-        </div>
-      </div>
-    ` : ''}
 
     <div class="sec-title">الجداول التدريبية <span class="link" onclick="setTab('prog')">الكل ‹</span></div>
     <div class="hscroll">
